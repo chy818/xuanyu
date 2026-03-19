@@ -1,6 +1,6 @@
 /**
- * @file hello.zh
- * @brief CCAS 测试程序 - Hello World
+ * @file hello.xy
+ * @brief 玄语测试程序 - Hello World
  * @description 验证词法分析器和语义空格规则
  * 
  * 运算符使用标准 ASCII 符号:

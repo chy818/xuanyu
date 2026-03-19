@@ -285,7 +285,7 @@ fn print_usage(program: &str) {
     println!("  --run         编译并运行程序");
     println!();
     println!("示例:");
-    println!("  {} hello.zh          只生成 IR", program);
-    println!("  {} hello.zh --build  生成可执行文件", program);
-    println!("  {} hello.zh --run    编译并运行", program);
+    println!("  {} hello.xy          只生成 IR", program);
+    println!("  {} hello.xy --build  生成可执行文件", program);
+    println!("  {} hello.xy --run    编译并运行", program);
 }
