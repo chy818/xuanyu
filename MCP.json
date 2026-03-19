@@ -1,0 +1,23 @@
+{
+  "name": "全能研发团队",
+  "version": "1.0.0",
+  "skills": [
+    "product-architect",
+    "fullstack-coder",
+    "ui-ux-engineer",
+    "qa-security-expert",
+    "devops-sre",
+    "tech-writer",
+    "data-engineer",
+    "team-coach"
+  ],
+  "rules": {
+    "enabled": true,
+    "path": ".trae/rules"
+  },
+  "output": {
+    "language": "zh-CN",
+    "format": "markdown",
+    "showCode": true
+  }
+}

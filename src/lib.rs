@@ -1,6 +1,6 @@
 /**
  * @file lib.rs
- * @brief CCAS 中文计算体系编译器 (zhcc) 主库
+ * @brief 玄语编译器 主库
  * @description 编译器核心模块，包含词法分析、语法分析、代码生成
  */
 

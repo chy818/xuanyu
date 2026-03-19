@@ -1,9 +1,9 @@
 [package]
-name = "zhcc"
+name = "xuanyu"
 version = "0.1.0"
 edition = "2021"
-authors = ["CCAS Team <zhcc@ccas.org>"]
-description = "中文计算体系编译器 (Chinese Compiler Collection)"
+authors = ["玄语 Team <xuanyu@ccas.org>"]
+description = "玄语编译器 - A Chinese-based compiler infrastructure"
 license = "CC-BY-SA-4.0"
 
 [dependencies]
@@ -23,11 +23,11 @@ llvm = ["inkwell"]
 debug = []
 
 [lib]
-name = "zhcc"
+name = "xuanyu"
 path = "src/lib.rs"
 
 [[bin]]
-name = "zhcc"
+name = "xy"
 path = "src/main.rs"
 
 [profile.release]
