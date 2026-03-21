@@ -1,0 +1,9 @@
+/**
+ * @file hello.xy
+ * @brief 自展测试用例 - Hello World
+ */
+
+函数 主() : 整数 {
+    打印("Hello")
+    返回 0
+}

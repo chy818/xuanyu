@@ -1,0 +1,11 @@
+/**
+ * @file lexer.xy
+ * @brief 词法分析器模块
+ */
+
+函数 lex(): 整数 {
+    打印("lexer ok")
+    返回 0
+}
+
+打印("lexer loaded")

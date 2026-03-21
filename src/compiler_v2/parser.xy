@@ -1,0 +1,11 @@
+/**
+ * @file parser.xy
+ * @brief 语法分析器模块
+ */
+
+函数 parse(): 整数 {
+    打印("parser ok")
+    返回 0
+}
+
+打印("parser loaded")

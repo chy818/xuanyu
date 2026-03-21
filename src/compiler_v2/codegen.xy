@@ -1,0 +1,11 @@
+/**
+ * @file codegen.xy
+ * @brief 代码生成器模块
+ */
+
+函数 gen(): 整数 {
+    打印("codegen ok")
+    返回 0
+}
+
+打印("codegen loaded")

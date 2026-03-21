@@ -651,7 +651,7 @@ impl SemanticAnalyzer {
     /**
      * 验证表达式
      */
-    fn analyze_expression(&self, expr: &Expr) -> Result<Type, Vec<TypeError>> {
+    fn analyze_expression(&mut self, expr: &Expr) -> Result<Type, Vec<TypeError>> {
         match expr {
             Expr::Identifier(ident) => {
                 // 查找符号
@@ -691,7 +691,7 @@ impl SemanticAnalyzer {
     /**
      * 验证二元表达式
      */
-    fn analyze_binary_expression(&self, binary: &BinaryExpr) -> Result<Type, Vec<TypeError>> {
+    fn analyze_binary_expression(&mut self, binary: &BinaryExpr) -> Result<Type, Vec<TypeError>> {
         let left_type = self.analyze_expression(&binary.left)?;
         let right_type = self.analyze_expression(&binary.right)?;
 
@@ -737,7 +737,7 @@ impl SemanticAnalyzer {
     /**
      * 验证一元表达式
      */
-    fn analyze_unary_expression(&self, unary: &UnaryExpr) -> Result<Type, Vec<TypeError>> {
+    fn analyze_unary_expression(&mut self, unary: &UnaryExpr) -> Result<Type, Vec<TypeError>> {
         let operand_type = self.analyze_expression(&unary.operand)?;
 
         match unary.op {
@@ -780,7 +780,7 @@ impl SemanticAnalyzer {
     /**
      * 验证函数调用表达式
      */
-    fn analyze_call_expression(&self, call: &CallExpr) -> Result<Type, Vec<TypeError>> {
+    fn analyze_call_expression(&mut self, call: &CallExpr) -> Result<Type, Vec<TypeError>> {
         // 分析函数名表达式
         if let Expr::Identifier(ident) = &*call.function {
             // 检查是否为内置函数
@@ -792,26 +792,70 @@ impl SemanticAnalyzer {
                 _ => {}
             }
             
-            // 查找函数
+            // 查找符号
             let symbol = self.lookup_symbol(&ident.name);
-            if symbol.is_none() {
-                return Err(vec![TypeError {
-                    code: "CCAS-T008".to_string(),
-                    message: format!("未定义的函数: {}", ident.name),
-                    span: ident.span,
-                }]);
+            if let Some(sym) = symbol {
+                // 如果找到符号，检查是否是枚举变体
+                let sym_type_str = format!("{:?}", sym.symbol_type);
+                if sym_type_str.contains("::") {
+                    // 是枚举变体构造函数，提取枚举类型
+                    let enum_name = sym_type_str
+                        .trim_start_matches("Custom(\"")
+                        .trim_end_matches("\")");
+                    let parts: Vec<&str> = enum_name.split("::").collect();
+                    if !parts.is_empty() {
+                        return Ok(Type::Custom(parts[0].to_string()));
+                    }
+                }
+                // 返回找到的符号类型
+                return Ok(sym.symbol_type.clone());
             }
+            
+            // 没找到，尝试查找枚举变体
+            if let Some(enum_name) = self.find_enum_variant(&ident.name) {
+                return Ok(Type::Custom(enum_name));
+            }
+            
+            return Err(vec![TypeError {
+                code: "CCAS-T008".to_string(),
+                message: format!("未定义的函数: {}", ident.name),
+                span: ident.span,
+            }]);
         }
 
         // TODO: 检查参数类型匹配
         
         Ok(Type::Int) // 简化返回 int
     }
+    
+    /**
+     * 查找枚举变体（通过遍历所有符号）
+     */
+    fn find_enum_variant(&self, variant_name: &str) -> Option<String> {
+        for scope in &self.scopes {
+            for (name, symbol) in &scope.symbols {
+                if name == variant_name {
+                    let sym_type_str = format!("{:?}", symbol.symbol_type);
+                    if sym_type_str.contains("::") {
+                        // 提取枚举名: Custom("颜色::红") -> 颜色
+                        let enum_name = sym_type_str
+                            .trim_start_matches("Custom(\"")
+                            .trim_end_matches("\")");
+                        let parts: Vec<&str> = enum_name.split("::").collect();
+                        if !parts.is_empty() {
+                            return Some(parts[0].to_string());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
 
     /**
      * 验证成员访问表达式
      */
-    fn analyze_member_expression(&self, member: &MemberAccessExpr) -> Result<Type, Vec<TypeError>> {
+    fn analyze_member_expression(&mut self, member: &MemberAccessExpr) -> Result<Type, Vec<TypeError>> {
         // 分析对象表达式
         let object_type = self.analyze_expression(&member.object)?;
         

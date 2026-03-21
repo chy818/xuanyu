@@ -1,0 +1,11 @@
+/**
+ * @file runtime.xy
+ * @brief 运行时库交互模块
+ */
+
+函数 runtime(): 整数 {
+    打印("runtime ok")
+    返回 0
+}
+
+打印("runtime loaded")
