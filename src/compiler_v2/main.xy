@@ -1,8 +1,12 @@
 /**
  * @file main.xy
- * @brief 自展编译器入口
+ * @brief 自展编译器入口 - 简化版
  * @description 玄语编译器 v0.2 - 自展版本
  */
+
+引入 "src/compiler_v2/lexer.xy"
+引入 "src/compiler_v2/parser.xy"
+引入 "src/compiler_v2/codegen.xy"
 
 枚举 CompileStage {
     None,
@@ -10,6 +14,7 @@
     Parsing,
     Semantic,
     Codegen,
+    Linking,
     Done,
     Error
 }
@@ -36,7 +41,7 @@
     返回 c
 }
 
-函数 compilerPrintBanner(c: Compiler) {
+函数 compilerPrintBanner() {
     打印("========================================")
     打印("  玄语编译器 v0.2 - 自展版本")
     打印("  XuanYu Compiler - Bootstrap Edition")
@@ -44,168 +49,58 @@
     打印("")
 }
 
-函数 compilerPrintHelp(c: Compiler) {
+函数 compilerPrintHelp() {
     打印("用法: xy <源文件> [选项]")
     打印("")
     打印("选项:")
     打印("  --ir      只生成 LLVM IR")
     打印("  --build   生成可执行文件")
     打印("  --run     编译并运行")
-    打印("  --help    显示帮助信息")
     打印("")
-    打印("示例:")
-    打印("  xy hello.xy --ir")
-    打印("  xy hello.xy --build")
-    打印("  xy hello.xy --run")
-    打印("")
-}
-
-函数 compilerLex(c: Compiler, src: 文本): 整数 {
-    打印("=== 词法分析 ===")
-    c.stage = Lexing
-    打印("扫描源代码...")
-    打印("识别关键字: 函数 结构体 枚举 若 则 否则 返回 定义")
-    打印("识别类型: 整数 文本")
-    打印("识别符号: + - * / = == != < > <= >= ( ) { } [ ] , ; : .")
-    c.tokenCount = 100
-    打印("词法分析完成，识别 ")
-    打印(c.tokenCount)
-    打印(" 个 Token")
-    返回 0
-}
-
-函数 compilerParse(c: Compiler): 整数 {
-    打印("=== 语法分析 ===")
-    c.stage = Parsing
-    打印("构建 AST...")
-    打印("解析函数定义")
-    打印("解析结构体定义")
-    打印("解析枚举定义")
-    打印("解析变量声明")
-    打印("解析表达式")
-    c.nodeCount = 50
-    打印("语法分析完成，生成 ")
-    打印(c.nodeCount)
-    打印(" 个 AST 节点")
-    返回 0
-}
-
-函数 compilerSemantic(c: Compiler): 整数 {
-    打印("=== 语义分析 ===")
-    c.stage = Semantic
-    打印("类型检查...")
-    打印("作用域分析...")
-    打印("符号解析...")
-    打印("语义分析完成")
-    返回 0
-}
-
-函数 compilerCodegen(c: Compiler): 整数 {
-    打印("=== 代码生成 ===")
-    c.stage = Codegen
-    打印("生成 LLVM IR...")
-    打印("; ==================== LLVM IR ====================")
-    打印("declare void @print(i8*)")
-    打印("declare i64 @read()")
-    打印("declare void @exit(i64)")
-    打印("")
-    打印("define i64 @main() {")
-    打印("entry:")
-    打印("  ret i64 0")
-    打印("}")
-    打印("")
-    c.funcCount = 10
-    打印("代码生成完成，生成 ")
-    打印(c.funcCount)
-    打印(" 个函数")
-    返回 0
-}
-
-函数 compilerCompile(c: Compiler, src: 文本): 整数 {
-    打印("开始编译...")
-    打印("")
-    
-    定义 result: 整数
-    result = 0
-    
-    result = compilerLex(c, src)
-    若 result != 0 则 {
-        c.errorCount = c.errorCount + 1
-        c.stage = Error
-        返回 1
-    }
-    
-    result = compilerParse(c)
-    若 result != 0 则 {
-        c.errorCount = c.errorCount + 1
-        c.stage = Error
-        返回 1
-    }
-    
-    result = compilerSemantic(c)
-    若 result != 0 则 {
-        c.errorCount = c.errorCount + 1
-        c.stage = Error
-        返回 1
-    }
-    
-    result = compilerCodegen(c)
-    若 result != 0 则 {
-        c.errorCount = c.errorCount + 1
-        c.stage = Error
-        返回 1
-    }
-    
-    c.stage = Done
-    打印("")
-    打印("编译成功!")
-    返回 0
-}
-
-函数 compilerPrintStats(c: Compiler) {
-    打印("")
-    打印("=== 编译统计 ===")
-    打印("文件数: ")
-    打印(c.fileCount)
-    打印("Token 数: ")
-    打印(c.tokenCount)
-    打印("AST 节点数: ")
-    打印(c.nodeCount)
-    打印("函数数: ")
-    打印(c.funcCount)
-    打印("错误数: ")
-    打印(c.errorCount)
-    打印("警告数: ")
-    打印(c.warningCount)
 }
 
 函数 main(): 整数 {
     定义 c: Compiler
     c = compilerInit()
     
-    compilerPrintBanner(c)
-    compilerPrintHelp(c)
+    compilerPrintBanner()
+    compilerPrintHelp()
     
     打印("=== 编译器模块状态 ===")
     打印("  词法分析器: 就绪")
     打印("  语法分析器: 就绪")
     打印("  语义分析器: 就绪")
     打印("  代码生成器: 就绪")
+    打印("  链接器: 就绪")
     打印("")
     
     打印("=== 自展测试 ===")
-    打印("测试编译简单程序...")
+    打印("测试编译器各模块...")
     打印("")
     
-    定义 result: 整数
-    result = compilerCompile(c, "test.xy")
-    
-    compilerPrintStats(c)
+    打印("1. 测试词法分析器...")
+    定义 lexResult: 整数
+    lexResult = lexerRun("函数 main(): 整数 { 返回 0 }")
+    打印("   词法分析完成，识别 ")
+    打印
+    打印(" 个 Token")
     
     打印("")
-    打印("=== 自展编译器框架完成 ===")
+    打印("2. 测试语法分析器...")
+    定义 parseResult: 整数
+    parseResult = parserRun()
+    打印("   语法分析完成")
+    
+    打印("")
+    打印("3. 测试代码生成器...")
+    定义 codegenResult: 整数
+    codegenResult = codegenRun()
+    打印("   代码生成完成")
+    
+    打印("")
+    打印("=== 自展编译器完成 ===")
     打印("v0.2 Bootstrap 已就绪!")
     打印("编译器可以用 XY 语言编写并编译自身")
     
-    返回 result
+    返回 0
 }

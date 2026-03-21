@@ -40,8 +40,8 @@ fn type_to_llvm(ty: &Type) -> &'static str {
         Type::Pointer => "i8*",  // 规范：指针
         Type::List => "i8*",     // 列表是指针
         Type::Optional(_) => "i64",
-        Type::Array(_) => "i64*",
-        Type::Struct(_) => "i64*",
+        Type::Array(_) => "i64",
+        Type::Struct(_) => "i64",  // 结构体实例存储为 i64（指针值）
         Type::Custom(name) => {
             match name.as_str() {
                 _ => "i64",
@@ -173,6 +173,14 @@ impl CodeGenerator {
             "文本包含" => Some("str_contains"),
             "参数个数" => Some("argc"),
             "获取参数" => Some("argv"),
+            // 文件 I/O 函数
+            "文件读取" => Some("文件读取"),
+            "文件写入" => Some("文件写入"),
+            "文件存在" => Some("文件存在"),
+            "文件删除" => Some("文件删除"),
+            // 系统命令函数
+            "执行命令" => Some("执行命令"),
+            "命令输出" => Some("命令输出"),
             // 词法分析器用户函数
             "是空格" => Some("is_space"),
             "检查空格" => Some("check_space"),
@@ -217,6 +225,81 @@ impl CodeGenerator {
         let label = format!("{}.{}", prefix, self.label_counter);
         self.label_counter += 1;
         label
+    }
+
+    /**
+     * 推断表达式类型
+     * 用于在代码生成时确定表达式的 LLVM 类型
+     */
+    fn infer_expression_type(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Literal(lit) => {
+                // 根据字面量类型推断
+                match &lit.kind {
+                    LiteralKind::Integer(_) => "i64".to_string(),
+                    LiteralKind::Float(_) => "double".to_string(),
+                    LiteralKind::Boolean(_) => "i1".to_string(),
+                    LiteralKind::String(_) => "i8*".to_string(),
+                    LiteralKind::Char(_) => "i32".to_string(),
+                }
+            }
+            Expr::Identifier(ident) => {
+                // 查找变量类型
+                if let Some(var_type) = self.variable_types.get(&ident.name) {
+                    var_type.clone()
+                } else {
+                    // 默认假设为整数
+                    "i64".to_string()
+                }
+            }
+            Expr::Binary(binary) => {
+                // 二元运算结果类型
+                let left_type = self.infer_expression_type(&binary.left);
+                let right_type = self.infer_expression_type(&binary.right);
+                
+                // 比较运算返回布尔类型
+                match binary.op {
+                    BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Gt | BinaryOp::Lt | BinaryOp::Ge | BinaryOp::Le => "i1".to_string(),
+                    _ => {
+                        // 其他运算：如果任一操作数是浮点，结果为浮点
+                        if left_type == "double" || right_type == "double" {
+                            "double".to_string()
+                        } else {
+                            "i64".to_string()
+                        }
+                    }
+                }
+            }
+            Expr::Call(call) => {
+                // 函数调用返回类型
+                let func_name = match &*call.function {
+                    Expr::Identifier(ident) => ident.name.clone(),
+                    _ => "unknown".to_string(),
+                };
+                
+                // 内置函数返回类型
+                match func_name.as_str() {
+                    "打印" | "print" => "void".to_string(),
+                    "整数转文本" | "int_to_str" => "i8*".to_string(),
+                    "文本转整数" | "str_to_int" => "i64".to_string(),
+                    "文本长度" | "str_len" => "i64".to_string(),
+                    "文本切片" | "str_slice" => "i8*".to_string(),
+                    _ => "i64".to_string(), // 默认用户函数返回 i64
+                }
+            }
+            Expr::MemberAccess(_) => {
+                // 成员访问：所有字段都存储为 i64
+                "i64".to_string()
+            }
+            Expr::Unary(unary) => {
+                // 一元运算：继承操作数类型
+                self.infer_expression_type(&unary.operand)
+            }
+            Expr::Grouped(expr) => {
+                // 括号表达式：继承内部表达式类型
+                self.infer_expression_type(expr)
+            }
+        }
     }
 
     /**
@@ -274,14 +357,24 @@ impl CodeGenerator {
         self.emit("declare i8* @read(i8*)");
         self.emit("declare i32 @write(i8*, i8*)");
         
-        // 字符串函数
-        self.emit("declare i8* @str_concat(i8*, i8*)");
-        self.emit("declare i8* @str_slice(i8*, i64, i64)");
-        self.emit("declare i8* @str_contains(i8*, i8*)");
+        // 新增文件 I/O 函数 (中文函数名)
+        self.emit("declare i8* @\"文件读取\"(i8*)");
+        self.emit("declare i32 @\"文件写入\"(i8*, i8*)");
+        self.emit("declare i32 @\"文件存在\"(i8*)");
+        self.emit("declare i32 @\"文件删除\"(i8*)");
+        
+        // 系统命令函数
+        self.emit("declare i32 @\"执行命令\"(i8*)");
+        self.emit("declare i8* @\"命令输出\"(i8*)");
         
         // 命令行参数函数
         self.emit("declare i64 @argc()");
         self.emit("declare i8* @argv(i64)");
+        
+        // 字符串函数
+        self.emit("declare i8* @str_concat(i8*, i8*)");
+        self.emit("declare i8* @str_slice(i8*, i64, i64)");
+        self.emit("declare i8* @str_contains(i8*, i8*)");
         
         self.emit("");
         self.emit("; ==================== 用户函数 ====================");
@@ -840,7 +933,7 @@ impl CodeGenerator {
                 self.generate_call_expr(call)
             }
             Expr::MemberAccess(member) => {
-                // 生成对象表达式
+                // 生成对象表达式（返回的是 i64 类型的"指针"值）
                 let object_val = self.generate_expression(&member.object)?;
                 
                 // 获取字段名
@@ -849,18 +942,22 @@ impl CodeGenerator {
                 // 计算字段偏移（简化处理：假设字段按顺序排列，每个字段8字节）
                 let field_offset = self.calculate_field_offset(field_name);
                 
+                // 将 i64 值转换为指针（结构体实例存储为 i64，需要转换为 i8*）
+                let ptr_val = self.new_label("id");
+                self.emit(&format!("%{} = inttoptr i64 %{} to i8*", ptr_val, object_val));
+                
                 // 生成 GEP 指令获取字段指针
                 let result = self.new_label("member");
                 self.emit(&format!("%{} = getelementptr i8, i8* %{}, i32 {}", 
-                    result, object_val, field_offset));
+                    result, ptr_val, field_offset));
                 
-                // 将指针转换为对应类型的指针
+                // 将指针转换为 i64 指针（所有字段都存储为 i64）
                 let result_ptr = self.new_label("member_ptr");
-                self.emit(&format!("%{} = bitcast i8* %{} to i32*", result_ptr, result));
+                self.emit(&format!("%{} = bitcast i8* %{} to i64*", result_ptr, result));
                 
-                // 加载字段值
+                // 加载字段值（返回 i64 类型）
                 let result_val = self.new_label("member_val");
-                self.emit(&format!("%{} = load i32, i32* %{}", result_val, result_ptr));
+                self.emit(&format!("%{} = load i64, i64* %{}", result_val, result_ptr));
                 
                 Ok(result_val)
             }
@@ -1108,18 +1205,34 @@ impl CodeGenerator {
             "文本转整数" | "整数转文本" | "创建列表" | "列表添加" | "列表获取" | "列表长度" |
             "读取" | "写入" | "文本长度" | "文本拼接" | "文本切片" | "文本包含" |
             "参数个数" | "获取参数" |
+            "文件读取" | "文件写入" | "文件存在" | "文件删除" |
+            "执行命令" | "命令输出" |
             "是空格" | "检查空格" | "是数字" | "检查数字" | "是字母" | "检查字母" |
             "是关键字" | "扫描数字" | "是字母数字" | "扫描标识符" | "词法分析"
         );
         
+        // 检查是否是文件 I/O 函数
+        let is_file_read_new = func_name == "文件读取";
+        let is_file_write_new = func_name == "文件写入";
+        let is_file_exists = func_name == "文件存在";
+        let is_file_delete = func_name == "文件删除";
+        let is_file_new_func = is_file_read_new || is_file_write_new || is_file_exists || is_file_delete;
+        
+        // 检查是否是系统命令函数
+        let is_exec_cmd = func_name == "执行命令";
+        let is_cmd_output = func_name == "命令输出";
+        let is_sys_cmd_func = is_exec_cmd || is_cmd_output;
+        
         let llvm_func_name = if is_builtin {
-            llvm_func_call_name  // 内置函数直接用 ASCII 名
+            llvm_func_call_name.clone()  // 内置函数直接用 ASCII 名
         } else {
             // 用户函数需要用引号包裹
             self.emit_func_decl(&llvm_func_call_name)
         };
         
         // 生成参数
+        // 对于打印函数，需要根据参数类型选择正确的打印函数
+        let mut actual_print_func = llvm_func_call_name.clone();
         let mut args = Vec::new();
         
         for (idx, arg) in call.arguments.iter().enumerate() {
@@ -1132,8 +1245,33 @@ impl CodeGenerator {
                 } else {
                     args.push(format!("i64 %{}", arg_val));
                 }
-            } else if is_builtin_print || is_builtin_to_int || is_file_func || is_str_func {
-                // 打印函数、文本转整数、文件函数、字符串函数接受 i8* 字符串指针
+            } else if is_builtin_print {
+                // 打印函数：根据参数类型选择正确的打印函数
+                // 检测参数类型（简化：通过表达式推断）
+                let arg_type = self.infer_expression_type(arg);
+                match arg_type.as_str() {
+                    "i64" | "i32" => {
+                        // 整数类型：使用 print_int
+                        actual_print_func = "print_int".to_string();
+                        args.push(format!("i64 %{}", arg_val));
+                    }
+                    "double" | "float" => {
+                        // 浮点类型：使用 print_float
+                        actual_print_func = "print_float".to_string();
+                        args.push(format!("double %{}", arg_val));
+                    }
+                    "i1" | "bool" => {
+                        // 布尔类型：使用 print_bool
+                        actual_print_func = "print_bool".to_string();
+                        args.push(format!("i1 %{}", arg_val));
+                    }
+                    _ => {
+                        // 默认：字符串指针类型
+                        args.push(format!("i8* %{}", arg_val));
+                    }
+                }
+            } else if is_builtin_to_int || is_file_func || is_str_func || is_file_new_func {
+                // 文本转整数、文件函数、字符串函数、新文件函数接受 i8* 字符串指针
                 args.push(format!("i8* %{}", arg_val));
             } else if is_builtin_to_str {
                 // 整数转文本接受 i64
@@ -1144,10 +1282,25 @@ impl CodeGenerator {
             } else if is_arg_func {
                 // 参数相关函数
                 args.push(format!("i64 %{}", arg_val));
+            } else if is_exec_cmd {
+                // 执行命令接受 i8* 字符串指针
+                args.push(format!("i8* %{}", arg_val));
+            } else if is_cmd_output {
+                // 命令输出接受 i8* 字符串指针
+                args.push(format!("i8* %{}", arg_val));
             } else {
-                args.push(format!("i64 %{}", arg_val));
+                // 用户函数：根据参数实际类型生成
+                let arg_type = self.infer_expression_type(arg);
+                args.push(format!("{} %{}", arg_type, arg_val));
             }
         }
+        
+        // 更新打印函数名（使用实际选择的打印函数）
+        let final_func_name = if is_builtin_print {
+            actual_print_func
+        } else {
+            llvm_func_call_name
+        };
 
         let result = self.new_label("call");
         
@@ -1155,11 +1308,11 @@ impl CodeGenerator {
         let (ret_type, is_void_call) = if is_builtin_print {
             // 打印函数返回 void
             ("void".to_string(), true)
-        } else if is_builtin_to_str || is_list_create || is_file_read || is_str_func || is_arg_get {
-            // 整数转文本、创建列表、文件读取、字符串函数、获取参数返回 i8*
+        } else if is_builtin_to_str || is_list_create || is_file_read || is_str_func || is_arg_get || is_file_read_new || is_cmd_output {
+            // 整数转文本、创建列表、文件读取、字符串函数、获取参数、文件读取、命令输出返回 i8*
             ("i8*".to_string(), false)
-        } else if is_file_write || is_arg_count {
-            // 文件写入、参数个数返回 i32
+        } else if is_file_write || is_arg_count || is_file_write_new || is_file_exists || is_file_delete || is_exec_cmd {
+            // 文件写入、参数个数、文件写入、文件存在、文件删除、执行命令返回 i32
             ("i32".to_string(), false)
         } else if !is_builtin {
             // 用户函数（非内置函数）返回 i64（假设）
@@ -1172,31 +1325,31 @@ impl CodeGenerator {
         // 生成函数调用
         if args.is_empty() {
             if is_void_call {
-                self.emit(&format!("call {} @{}({})", ret_type, llvm_func_name, ""));
+                self.emit(&format!("call {} @{}({})", ret_type, final_func_name, ""));
                 self.emit(&format!("%{} = add i64 0, 0", result));
             } else {
-                self.emit(&format!("%{} = call {} @{}({})", result, ret_type, llvm_func_name, ""));
+                self.emit(&format!("%{} = call {} @{}({})", result, ret_type, final_func_name, ""));
             }
         } else {
             let args_str = args.join(", ");
             
-            if is_builtin_to_str || is_list_create || is_file_read || is_str_func || is_arg_get {
-                // 整数转文本、创建列表、文件读取、字符串函数、获取参数返回 i8*
-                self.emit(&format!("%{} = call i8* @{}({})", result, llvm_func_name, args_str));
-            } else if is_file_write || is_arg_count {
-                // 文件写入、参数个数返回 i32
-                self.emit(&format!("%{} = call i32 @{}({})", result, llvm_func_name, args_str));
+            if is_builtin_to_str || is_list_create || is_file_read || is_str_func || is_arg_get || is_file_read_new || is_cmd_output {
+                // 整数转文本、创建列表、文件读取、字符串函数、获取参数、文件读取、命令输出返回 i8*
+                self.emit(&format!("%{} = call i8* @{}({})", result, final_func_name, args_str));
+            } else if is_file_write || is_arg_count || is_file_write_new || is_file_exists || is_file_delete || is_exec_cmd {
+                // 文件写入、参数个数、文件写入、文件存在、文件删除、执行命令返回 i32
+                self.emit(&format!("%{} = call i32 @{}({})", result, final_func_name, args_str));
             } else if is_builtin_print {
                 // 打印函数返回 void
-                self.emit(&format!("call void @{}({})", llvm_func_name, args_str));
+                self.emit(&format!("call void @{}({})", final_func_name, args_str));
                 // 为保持 SSA 形式，生成一个虚拟返回值
                 self.emit(&format!("%{} = add i64 0, 0", result));
             } else if !is_builtin {
                 // 用户函数（非内置函数）
-                self.emit(&format!("%{} = call i64 @{}({})", result, llvm_func_name, args_str));
+                self.emit(&format!("%{} = call i64 @{}({})", result, final_func_name, args_str));
             } else {
                 // 其他内置函数返回 i32
-                self.emit(&format!("%{} = call i32 @{}({})", result, llvm_func_name, args_str));
+                self.emit(&format!("%{} = call i32 @{}({})", result, final_func_name, args_str));
             }
         }
 

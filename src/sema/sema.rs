@@ -477,6 +477,16 @@ impl SemanticAnalyzer {
         self.define_symbol("参数个数".to_string(), Type::Int, false, Span::dummy());
         self.define_symbol("获取参数".to_string(), Type::String, false, Span::dummy());
         
+        // 新增文件 I/O 函数
+        self.define_symbol("文件读取".to_string(), Type::String, false, Span::dummy());
+        self.define_symbol("文件写入".to_string(), Type::Int, false, Span::dummy());
+        self.define_symbol("文件存在".to_string(), Type::Int, false, Span::dummy());
+        self.define_symbol("文件删除".to_string(), Type::Int, false, Span::dummy());
+        
+        // 新增系统命令函数
+        self.define_symbol("执行命令".to_string(), Type::Int, false, Span::dummy());
+        self.define_symbol("命令输出".to_string(), Type::String, false, Span::dummy());
+        
         Ok(())
     }
 
