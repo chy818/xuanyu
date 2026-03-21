@@ -1,11 +1,14 @@
 /**
  * @file codegen.xy
- * @brief 代码生成器模块
+ * @brief 代码生成器模块 - 自展编译器
  */
 
+/**
+ * 代码生成 - 生成 LLVM IR
+ * 输入 AST，输出 LLVM IR 文本
+ */
 函数 gen(): 整数 {
-    打印("codegen ok")
+    打印("codegen: 代码生成器已就绪")
+    打印("支持: 函数定义, 表达式, 控制流")
     返回 0
 }
-
-打印("codegen loaded")

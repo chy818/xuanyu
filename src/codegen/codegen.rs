@@ -38,6 +38,7 @@ fn type_to_llvm(ty: &Type) -> &'static str {
         Type::Char => "i8",
         Type::Void => "void",
         Type::Pointer => "i8*",  // 规范：指针
+        Type::List => "i8*",     // 列表是指针
         Type::Optional(_) => "i64",
         Type::Array(_) => "i64*",
         Type::Struct(_) => "i64*",

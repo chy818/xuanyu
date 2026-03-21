@@ -643,6 +643,8 @@ pub enum Type {
     Void,
     /// 指针 (用于FFI和列表)
     Pointer,
+    /// 列表类型
+    List,
     /// 或许类型
     Optional(Box<Type>),
     /// 数组

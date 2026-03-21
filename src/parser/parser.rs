@@ -301,7 +301,7 @@ impl Parser {
         // 解析字段列表
         let mut fields = Vec::new();
         while !self.check(&TokenType::右花括号) {
-            // 解析字段: 标识符 ':' 类型
+            // 解析字段名
             let field_name = match self.current() {
                 Some(Token { token_type: TokenType::标识符, literal, .. }) => {
                     literal.clone()
@@ -316,11 +316,15 @@ impl Parser {
             };
             self.advance();
             
-            // 期望 ':'
-            self.expect(&TokenType::冒号)?;
-            
-            // 解析类型
-            let field_type = self.parse_type()?;
+            // 检查是否有类型标注: '字段' ':' '类型'
+            let field_type = if self.check(&TokenType::冒号) {
+                self.advance(); // 消耗 ':'
+                // 解析类型
+                self.parse_type()?
+            } else {
+                // 没有类型标注，默认使用空类型（用于自展编译器）
+                Type::Void
+            };
             
             fields.push(StructField {
                 name: field_name,
@@ -784,6 +788,11 @@ impl Parser {
             Some(Token { token_type: TokenType::Keyword(Keyword::指针), .. }) => {
                 self.position += 1;
                 Type::Pointer
+            }
+            Some(Token { token_type: TokenType::Keyword(Keyword::列表), .. }) => {
+                self.position += 1;
+                // 列表类型：可以后续解析泛型参数，但 v0.1 简化为 Type::List
+                Type::List
             }
             Some(Token { token_type: TokenType::Keyword(Keyword::或许), .. }) => {
                 self.position += 1;
