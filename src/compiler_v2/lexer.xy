@@ -4,58 +4,72 @@
  */
 
 // Token 类型
-枚举 Tok {
-    Kw,
-    Id,
-    Num,
-    Str,
-    Sym,
-    End,
-}
+枚举 Tok { Kw, Id, Num, Str, Sym, End }
 
 // 关键字
-枚举 Keyword {
-    Fn,
-    Struct,
-    Enum,
-    If,
-    Else,
-    While,
-    Return,
-}
+枚举 Keyword { Fn, Struct, Enum, If, Else, While, Return, Let }
 
 /**
- * 判断是否为关键字
+ * 关键字检测
  */
 函数 isKeyword(): 整数 {
     返回 0
 }
 
 /**
- * 判断是否为符号
+ * 符号检测
  */
 函数 isSymbol(): 整数 {
     返回 0
 }
 
 /**
- * 判断是否为字母
+ * 字母检测
  */
 函数 isAlpha(): 整数 {
     返回 0
 }
 
 /**
- * 判断是否为数字
+ * 数字检测
  */
 函数 isDigit(): 整数 {
     返回 0
 }
 
 /**
- * 词法分析主函数 - 扫描源码生成 Token 列表
+ * 扫描标识符
+ */
+函数 scanIdent(): 整数 {
+    返回 0
+}
+
+/**
+ * 扫描数字
+ */
+函数 scanNumber(): 整数 {
+    返回 0
+}
+
+/**
+ * 扫描字符串
+ */
+函数 scanString(): 整数 {
+    返回 0
+}
+
+/**
+ * 扫描符号
+ */
+函数 scanSymbol(): 整数 {
+    返回 0
+}
+
+/**
+ * 词法分析主函数
  */
 函数 lex(): 整数 {
+    打印("开始词法分析...")
     打印("lexer: 词法分析器已就绪")
     打印("支持: 关键字, 标识符, 数字, 字符串, 符号")
     返回 0

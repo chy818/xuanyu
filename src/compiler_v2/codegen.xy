@@ -4,24 +4,66 @@
  */
 
 // 代码生成器状态
-枚举 CodegenState {
-    Init,
-    Func,
-    Block,
-}
+枚举 CodegenState { Init, Func, Block }
 
 // 输出类型
-枚举 OutputType {
-    IR,
-    Obj,
+枚举 OutputType { IR, Obj }
+
+/**
+ * 新建代码生成器
+ */
+函数 newCodegen(): 整数 {
+    打印("newCodegen: 创建代码生成器")
+    返回 0
 }
 
 /**
- * 代码生成主函数 - 将 AST 转换为 LLVM IR
+ * 生成程序
+ */
+函数 genProgram(): 整数 {
+    打印("genProgram: 生成程序")
+    返回 0
+}
+
+/**
+ * 生成函数
+ */
+函数 genFunc(): 整数 {
+    打印("genFunc: 生成函数")
+    返回 0
+}
+
+/**
+ * 生成语句
+ */
+函数 genStmt(): 整数 {
+    打印("genStmt: 生成语句")
+    返回 0
+}
+
+/**
+ * 生成表达式
+ */
+函数 genExpr(): 整数 {
+    打印("genExpr: 生成表达式")
+    返回 0
+}
+
+/**
+ * 生成类型
+ */
+函数 genType(): 整数 {
+    打印("genType: 生成类型")
+    返回 0
+}
+
+/**
+ * 代码生成主函数
  */
 函数 gen(): 整数 {
+    打印("开始代码生成...")
     打印("codegen: 代码生成器已就绪")
-    打印("支持: 函数定义, 表达式, 控制流")
+    打印("支持: 函数, 表达式, 控制流")
     打印("目标: LLVM IR")
     返回 0
 }
