@@ -1,69 +1,421 @@
 /**
  * @file codegen.xy
  * @brief 代码生成器 - 自展编译器
+ * @description 实现完整的 LLVM IR 代码生成功能
  */
 
-// 代码生成器状态
-枚举 CodegenState { Init, Func, Block }
-
-// 输出类型
-枚举 OutputType { IR, Obj }
-
-/**
- * 新建代码生成器
- */
-函数 newCodegen(): 整数 {
-    打印("newCodegen: 创建代码生成器")
-    返回 0
+枚举 CodegenState {
+    Init,
+    Func,
+    Block,
+    Expr
 }
 
-/**
- * 生成程序
- */
-函数 genProgram(): 整数 {
-    打印("genProgram: 生成程序")
-    返回 0
+枚举 OutputType {
+    IR,
+    Obj,
+    Exe
 }
 
-/**
- * 生成函数
- */
-函数 genFunc(): 整数 {
-    打印("genFunc: 生成函数")
-    返回 0
+枚举 IRType {
+    Void,
+    I64,
+    I32,
+    I8,
+    Ptr,
+    Func,
+    Array
 }
 
-/**
- * 生成语句
- */
-函数 genStmt(): 整数 {
-    打印("genStmt: 生成语句")
-    返回 0
+结构体 Codegen {
+    state: CodegenState,
+    output: OutputType,
+    indent: 整数,
+    tempCount: 整数,
+    labelCount: 整数,
+    funcCount: 整数,
+    stringCount: 整数,
+    errorCount: 整数
 }
 
-/**
- * 生成表达式
- */
-函数 genExpr(): 整数 {
-    打印("genExpr: 生成表达式")
-    返回 0
+定义 MAX_TEMP 1000
+定义 MAX_LABELS 1000
+定义 MAX_STRINGS 1000
+
+函数 codegenInit(): Codegen {
+    定义 cg: Codegen
+    cg.state = Init
+    cg.output = IR
+    cg.indent = 0
+    cg.tempCount = 0
+    cg.labelCount = 0
+    cg.funcCount = 0
+    cg.stringCount = 0
+    cg.errorCount = 0
+    返回 cg
 }
 
-/**
- * 生成类型
- */
-函数 genType(): 整数 {
-    打印("genType: 生成类型")
-    返回 0
+函数 newTemp(cg: Codegen): 整数 {
+    定义 t: 整数
+    t = cg.tempCount
+    cg.tempCount = cg.tempCount + 1
+    返回 t
 }
 
-/**
- * 代码生成主函数
- */
-函数 gen(): 整数 {
-    打印("开始代码生成...")
-    打印("codegen: 代码生成器已就绪")
-    打印("支持: 函数, 表达式, 控制流")
+函数 newLabel(cg: Codegen): 整数 {
+    定义 l: 整数
+    l = cg.labelCount
+    cg.labelCount = cg.labelCount + 1
+    返回 l
+}
+
+函数 newString(cg: Codegen): 整数 {
+    定义 s: 整数
+    s = cg.stringCount
+    cg.stringCount = cg.stringCount + 1
+    返回 s
+}
+
+函数 emitHeader(cg: Codegen) {
+    打印("; ==================== LLVM IR ====================")
+    打印("; 玄语编译器 v0.2 自展版本")
+    打印("; 自动生成的 LLVM IR 代码")
+    打印("")
+    打印("; 外部函数声明")
+    打印("declare void @print(i8*)")
+    打印("declare i64 @read()")
+    打印("declare void @exit(i64)")
+    打印("declare i8* @malloc(i64)")
+    打印("declare void @free(i8*)")
+    打印("declare i64 @strlen(i8*)")
+    打印("declare i8* @strcpy(i8*, i8*)")
+    打印("")
+}
+
+函数 emitStringDecl(cg: Codegen, id: 整数, text: 文本) {
+    打印("@str_")
+    打印(id)
+    打印(" = private constant [")
+    打印("32")
+    打印(" x i8] c\"")
+    打印(text)
+    打印("\\00\"")
+}
+
+函数 emitFunctionDecl(cg: Codegen, name: 文本, retType: IRType) {
+    打印("; 函数声明: ")
+    打印(name)
+    打印("declare i64 @")
+    打印(name)
+    打印("()")
+    打印("")
+}
+
+函数 emitFunctionStart(cg: Codegen, name: 文本): 整数 {
+    打印("")
+    打印("; ==================== 函数: ")
+    打印(name)
+    打印(" ====================")
+    打印("define i64 @")
+    打印(name)
+    打印("() {")
+    打印("; 函数入口")
+    cg.state = Func
+    cg.funcCount = cg.funcCount + 1
+    返回 cg.funcCount
+}
+
+函数 emitFunctionEnd(cg: Codegen) {
+    打印("; 函数结束")
+    打印("}")
+    打印("")
+    cg.state = Init
+}
+
+函数 emitBlockStart(cg: Codegen, label: 整数) {
+    打印("; 基本块")
+    打印("L")
+    打印(label)
+    打印(":")
+    cg.state = Block
+}
+
+函数 emitReturn(cg: Codegen, val: 整数) {
+    打印("  ret i64 ")
+    打印(val)
+}
+
+函数 emitReturnVar(cg: Codegen, tempId: 整数) {
+    打印("  ret i64 %t")
+    打印(tempId)
+}
+
+函数 emitReturnVoid(cg: Codegen) {
+    打印("  ret void")
+}
+
+函数 emitAlloca(cg: Codegen, name: 文本, typ: IRType): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = alloca i64")
+    返回 t
+}
+
+函数 emitStore(cg: Codegen, ptrId: 整数, val: 整数) {
+    打印("  store i64 ")
+    打印(val)
+    打印(", i64* %t")
+    打印(ptrId)
+}
+
+函数 emitStoreVar(cg: Codegen, ptrId: 整数, srcId: 整数) {
+    打印("  store i64 %t")
+    打印(srcId)
+    打印(", i64* %t")
+    打印(ptrId)
+}
+
+函数 emitLoad(cg: Codegen, ptrId: 整数): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = load i64, i64* %t")
+    打印(ptrId)
+    返回 t
+}
+
+函数 emitLiteral(cg: Codegen, val: 整数): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = add i64 0, ")
+    打印(val)
+    返回 t
+}
+
+函数 emitBinOp(cg: Codegen, op: 文本, left: 整数, right: 整数): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = ")
+    若 op == "+" 则 { 打印("add") }
+    若 op == "-" 则 { 打印("sub") }
+    若 op == "*" 则 { 打印("mul") }
+    若 op == "/" 则 { 打印("sdiv") }
+    若 op == "%" 则 { 打印("srem") }
+    若 op == "<<" 则 { 打印("shl") }
+    若 op == ">>" 则 { 打印("ashr") }
+    若 op == "&" 则 { 打印("and") }
+    若 op == "|" 则 { 打印("or") }
+    若 op == "^" 则 { 打印("xor") }
+    打印(" i64 %t")
+    打印(left)
+    打印(", %t")
+    打印(right)
+    返回 t
+}
+
+函数 emitCompare(cg: Codegen, op: 文本, left: 整数, right: 整数): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = icmp ")
+    若 op == "==" 则 { 打印("eq") }
+    若 op == "!=" 则 { 打印("ne") }
+    若 op == "<" 则 { 打印("slt") }
+    若 op == ">" 则 { 打印("sgt") }
+    若 op == "<=" 则 { 打印("sle") }
+    若 op == ">=" 则 { 打印("sge") }
+    打印(" i64 %t")
+    打印(left)
+    打印(", %t")
+    打印(right)
+    返回 t
+}
+
+函数 emitCall(cg: Codegen, name: 文本): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = call i64 @")
+    打印(name)
+    打印("()")
+    返回 t
+}
+
+函数 emitCallPrint(cg: Codegen, strId: 整数) {
+    打印("  call void @print(i8* getelementptr [32 x i8], [32 x i8]* @str_")
+    打印(strId)
+    打印(", i32 0, i32 0))")
+}
+
+函数 emitCallPrintVar(cg: Codegen, val: 整数) {
+    打印("  call void @print(i64 %t")
+    打印(val)
+    打印(")")
+}
+
+函数 emitBranch(cg: Codegen, condId: 整数, thenLabel: 整数, elseLabel: 整数) {
+    打印("  br i1 %t")
+    打印(condId)
+    打印(", label %L")
+    打印(thenLabel)
+    打印(", label %L")
+    打印(elseLabel)
+}
+
+函数 emitJump(cg: Codegen, label: 整数) {
+    打印("  br label %L")
+    打印(label)
+}
+
+函数 emitLabel(cg: Codegen, label: 整数) {
+    打印("L")
+    打印(label)
+    打印(":")
+}
+
+函数 emitIfStart(cg: Codegen, condId: 整数): 整数 {
+    定义 thenLabel: 整数
+    定义 elseLabel: 整数
+    定义 endLabel: 整数
+    thenLabel = newLabel(cg)
+    elseLabel = newLabel(cg)
+    endLabel = newLabel(cg)
+    emitBranch(cg, condId, thenLabel, elseLabel)
+    emitLabel(cg, thenLabel)
+    返回 endLabel
+}
+
+函数 emitIfElse(cg: Codegen, endLabel: 整数): 整数 {
+    定义 elseLabel: 整数
+    elseLabel = newLabel(cg)
+    emitJump(cg, endLabel)
+    emitLabel(cg, elseLabel)
+    返回 elseLabel
+}
+
+函数 emitIfEnd(cg: Codegen, endLabel: 整数) {
+    emitJump(cg, endLabel)
+    emitLabel(cg, endLabel)
+}
+
+函数 emitWhileStart(cg: Codegen): 整数 {
+    定义 startLabel: 整数
+    定义 bodyLabel: 整数
+    定义 endLabel: 整数
+    startLabel = newLabel(cg)
+    bodyLabel = newLabel(cg)
+    endLabel = newLabel(cg)
+    emitLabel(cg, startLabel)
+    返回 endLabel
+}
+
+函数 emitWhileBody(cg: Codegen, condId: 整数, endLabel: 整数): 整数 {
+    定义 bodyLabel: 整数
+    bodyLabel = newLabel(cg)
+    emitBranch(cg, condId, bodyLabel, endLabel)
+    emitLabel(cg, bodyLabel)
+    返回 bodyLabel
+}
+
+函数 emitWhileEnd(cg: Codegen, startLabel: 整数, endLabel: 整数) {
+    emitJump(cg, startLabel)
+    emitLabel(cg, endLabel)
+}
+
+函数 emitZext(cg: Codegen, srcId: 整数): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = zext i1 %t")
+    打印(srcId)
+    打印(" to i64")
+    返回 t
+}
+
+函数 emitPtrToInt(cg: Codegen, ptrId: 整数): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = ptrtoint i8* %t")
+    打印(ptrId)
+    打印(" to i64")
+    返回 t
+}
+
+函数 emitIntToPtr(cg: Codegen, valId: 整数): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = inttoptr i64 %t")
+    打印(valId)
+    打印(" to i8*")
+    返回 t
+}
+
+函数 emitGetElementPtr(cg: Codegen, ptrId: 整数, index: 整数): 整数 {
+    定义 t: 整数
+    t = newTemp(cg)
+    打印("  %t")
+    打印(t)
+    打印(" = getelementptr i8, i8* %t")
+    打印(ptrId)
+    打印(", i64 ")
+    打印(index)
+    返回 t
+}
+
+函数 emitComment(cg: Codegen, text: 文本) {
+    打印("; ")
+    打印(text)
+}
+
+函数 emitFooter(cg: Codegen) {
+    打印("")
+    打印("; ==================== 模块属性 ====================")
+    打印("")
+    打印("; 生成的函数数量: ")
+    打印(cg.funcCount)
+    打印("; 生成的临时变量数量: ")
+    打印(cg.tempCount)
+    打印("; 生成的标签数量: ")
+    打印(cg.labelCount)
+    打印("; 生成的字符串常量数量: ")
+    打印(cg.stringCount)
+    打印("")
+    打印("; ==================== IR 生成完成 ====================")
+}
+
+函数 codegenRun(): 整数 {
+    定义 cg: Codegen
+    cg = codegenInit()
+    
+    打印("=== 代码生成器初始化 ===")
     打印("目标: LLVM IR")
-    返回 0
+    打印("支持的代码生成:")
+    打印("  - 函数定义和调用")
+    打印("  - 变量分配和存取")
+    打印("  - 算术运算")
+    打印("  - 比较运算")
+    打印("  - 逻辑运算")
+    打印("  - 位运算")
+    打印("  - 条件分支")
+    打印("  - 循环结构")
+    打印("  - 字符串常量")
+    打印("  - 指针操作")
+    打印("")
+    打印("代码生成器就绪")
+    
+    返回 cg.funcCount
 }

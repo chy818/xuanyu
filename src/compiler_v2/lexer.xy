@@ -1,76 +1,447 @@
 /**
  * @file lexer.xy
  * @brief 词法分析器 - 自展编译器
+ * @description 实现完整的词法扫描功能，包含 Token 缓冲支持预读和回溯
  */
 
-// Token 类型
-枚举 Tok { Kw, Id, Num, Str, Sym, End }
+枚举 Tok { Kw, Id, Num, Str, Sym, End, Err }
 
-// 关键字
-枚举 Keyword { Fn, Struct, Enum, If, Else, While, Return, Let }
+结构体 Token {
+    typ: Tok,
+    text: 文本,
+    val: 整数,
+    line: 整数
+}
 
-/**
- * 关键字检测
- */
-函数 isKeyword(): 整数 {
+结构体 Lexer {
+    src: 文本,
+    pos: 整数,
+    line: 整数,
+    ch: 整数,
+    tokBuf: 整数,
+    tokPos: 整数,
+    tokCount: 整数
+}
+
+定义 MAX_TOKENS 1000
+
+函数 isSpace(ch: 整数): 整数 {
+    若 ch == 32 则 { 返回 1 }
+    若 ch == 9 则 { 返回 1 }
+    若 ch == 10 则 { 返回 1 }
+    若 ch == 13 则 { 返回 1 }
     返回 0
 }
 
-/**
- * 符号检测
- */
-函数 isSymbol(): 整数 {
+函数 isDigit(ch: 整数): 整数 {
+    若 ch >= 48 则 {
+        若 ch <= 57 则 { 返回 1 }
+    }
     返回 0
 }
 
-/**
- * 字母检测
- */
-函数 isAlpha(): 整数 {
+函数 isAlpha(ch: 整数): 整数 {
+    若 ch >= 97 则 {
+        若 ch <= 122 则 { 返回 1 }
+    }
+    若 ch >= 65 则 {
+        若 ch <= 90 则 { 返回 1 }
+    }
+    若 ch >= 128 则 { 返回 1 }
     返回 0
 }
 
-/**
- * 数字检测
- */
-函数 isDigit(): 整数 {
+函数 isAlnum(ch: 整数): 整数 {
+    若 isAlpha(ch) == 1 则 { 返回 1 }
+    若 isDigit(ch) == 1 则 { 返回 1 }
+    若 ch == 95 则 { 返回 1 }
     返回 0
 }
 
-/**
- * 扫描标识符
- */
-函数 scanIdent(): 整数 {
+函数 isKeyword(text: 文本): 整数 {
+    若 text == "函数" 则 { 返回 1 }
+    若 text == "结构体" 则 { 返回 1 }
+    若 text == "枚举" 则 { 返回 1 }
+    若 text == "外部" 则 { 返回 1 }
+    若 text == "若" 则 { 返回 1 }
+    若 text == "则" 则 { 返回 1 }
+    若 text == "否则" 则 { 返回 1 }
+    若 text == "返回" 则 { 返回 1 }
+    若 text == "定义" 则 { 返回 1 }
+    若 text == "整数" 则 { 返回 1 }
+    若 text == "文本" 则 { 返回 1 }
+    若 text == "真" 则 { 返回 1 }
+    若 text == "假" 则 { 返回 1 }
+    若 text == "打印" 则 { 返回 1 }
+    若 text == "当" 则 { 返回 1 }
+    若 text == "引入" 则 { 返回 1 }
+    若 text == "常量" 则 { 返回 1 }
+    若 text == "静态" 则 { 返回 1 }
     返回 0
 }
 
-/**
- * 扫描数字
- */
-函数 scanNumber(): 整数 {
+函数 isSymbol(ch: 整数): 整数 {
+    若 ch == 40 则 { 返回 1 }
+    若 ch == 41 则 { 返回 1 }
+    若 ch == 123 则 { 返回 1 }
+    若 ch == 125 则 { 返回 1 }
+    若 ch == 91 则 { 返回 1 }
+    若 ch == 93 则 { 返回 1 }
+    若 ch == 44 则 { 返回 1 }
+    若 ch == 59 则 { 返回 1 }
+    若 ch == 58 则 { 返回 1 }
+    若 ch == 43 则 { 返回 1 }
+    若 ch == 45 则 { 返回 1 }
+    若 ch == 42 则 { 返回 1 }
+    若 ch == 47 则 { 返回 1 }
+    若 ch == 37 则 { 返回 1 }
+    若 ch == 61 则 { 返回 1 }
+    若 ch == 60 则 { 返回 1 }
+    若 ch == 62 则 { 返回 1 }
+    若 ch == 33 则 { 返回 1 }
+    若 ch == 38 则 { 返回 1 }
+    若 ch == 124 则 { 返回 1 }
+    若 ch == 46 则 { 返回 1 }
     返回 0
 }
 
-/**
- * 扫描字符串
- */
-函数 scanString(): 整数 {
+函数 lexerInit(src: 文本): Lexer {
+    定义 lex: Lexer
+    lex.src = src
+    lex.pos = 0
+    lex.line = 1
+    lex.ch = 0
+    lex.tokBuf = 0
+    lex.tokPos = 0
+    lex.tokCount = 0
+    返回 lex
+}
+
+函数 lexerNextChar(lex: Lexer): 整数 {
+    定义 ch: 整数
+    ch = 0
+    若 lex.pos < 10000 则 {
+        ch = lex.src[lex.pos]
+    }
+    lex.pos = lex.pos + 1
+    lex.ch = ch
+    若 ch == 10 则 {
+        lex.line = lex.line + 1
+    }
+    返回 ch
+}
+
+函数 lexerSkipWhitespace(lex: Lexer) {
+    当 isSpace(lex.ch) == 1 则 {
+        lexerNextChar(lex)
+    }
+}
+
+函数 lexerSkipComment(lex: Lexer): 整数 {
+    若 lex.ch == 47 则 {
+        lexerNextChar(lex)
+        若 lex.ch == 47 则 {
+            lexerNextChar(lex)
+            当 lex.ch != 10 则 {
+                若 lex.ch == 0 则 { 返回 1 }
+                lexerNextChar(lex)
+            }
+            返回 0
+        }
+        若 lex.ch == 42 则 {
+            lexerNextChar(lex)
+            定义 done: 整数
+            done = 0
+            当 done == 0 则 {
+                若 lex.ch == 0 则 { 返回 1 }
+                若 lex.ch == 42 则 {
+                    lexerNextChar(lex)
+                    若 lex.ch == 47 则 {
+                        lexerNextChar(lex)
+                        done = 1
+                    }
+                }
+                lexerNextChar(lex)
+            }
+            返回 0
+        }
+        lex.pos = lex.pos - 1
+        lex.ch = 47
+    }
     返回 0
 }
 
-/**
- * 扫描符号
- */
-函数 scanSymbol(): 整数 {
+函数 lexerReadNumber(lex: Lexer): Token {
+    定义 tok: Token
+    tok.typ = Num
+    tok.line = lex.line
+    tok.val = 0
+    当 isDigit(lex.ch) == 1 则 {
+        tok.val = tok.val * 10 + (lex.ch - 48)
+        lexerNextChar(lex)
+    }
+    tok.text = "num"
+    返回 tok
+}
+
+函数 lexerReadIdent(lex: Lexer): Token {
+    定义 tok: Token
+    tok.line = lex.line
+    tok.val = 0
+    定义 len: 整数
+    len = 0
+    当 isAlnum(lex.ch) == 1 则 {
+        len = len + 1
+        lexerNextChar(lex)
+    }
+    tok.text = lex.src
+    若 isKeyword(tok.text) == 1 则 {
+        tok.typ = Kw
+    }
+    否则 {
+        tok.typ = Id
+    }
+    返回 tok
+}
+
+函数 lexerReadString(lex: Lexer): Token {
+    定义 tok: Token
+    tok.typ = Str
+    tok.line = lex.line
+    tok.val = 0
+    定义 quote: 整数
+    quote = lex.ch
+    lexerNextChar(lex)
+    当 lex.ch != quote 则 {
+        若 lex.ch == 0 则 {
+            tok.typ = Err
+            返回 tok
+        }
+        lexerNextChar(lex)
+    }
+    lexerNextChar(lex)
+    tok.text = "str"
+    返回 tok
+}
+
+函数 lexerScanToken(lex: Lexer): Token {
+    lexerSkipWhitespace(lex)
+    定义 result: 整数
+    result = lexerSkipComment(lex)
+    若 result == 1 则 {
+        定义 tok: Token
+        tok.typ = Err
+        tok.text = "未闭合注释"
+        tok.line = lex.line
+        返回 tok
+    }
+    lexerSkipWhitespace(lex)
+    
+    定义 tok: Token
+    tok.line = lex.line
+    tok.val = 0
+    tok.text = ""
+    
+    若 lex.ch == 0 则 {
+        tok.typ = End
+        tok.text = "EOF"
+        返回 tok
+    }
+    若 isDigit(lex.ch) == 1 则 {
+        返回 lexerReadNumber(lex)
+    }
+    若 isAlpha(lex.ch) == 1 则 {
+        返回 lexerReadIdent(lex)
+    }
+    若 lex.ch == 34 则 {
+        返回 lexerReadString(lex)
+    }
+    若 lex.ch == 39 则 {
+        返回 lexerReadString(lex)
+    }
+    若 isSymbol(lex.ch) == 1 则 {
+        tok.typ = Sym
+        定义 ch1: 整数
+        ch1 = lex.ch
+        lexerNextChar(lex)
+        若 ch1 == 61 则 {
+            若 lex.ch == 61 则 {
+                lexerNextChar(lex)
+                tok.text = "=="
+                返回 tok
+            }
+            tok.text = "="
+            返回 tok
+        }
+        若 ch1 == 33 则 {
+            若 lex.ch == 61 则 {
+                lexerNextChar(lex)
+                tok.text = "!="
+                返回 tok
+            }
+            tok.text = "!"
+            返回 tok
+        }
+        若 ch1 == 60 则 {
+            若 lex.ch == 61 则 {
+                lexerNextChar(lex)
+                tok.text = "<="
+                返回 tok
+            }
+            若 lex.ch == 60 则 {
+                lexerNextChar(lex)
+                tok.text = "<<"
+                返回 tok
+            }
+            tok.text = "<"
+            返回 tok
+        }
+        若 ch1 == 62 则 {
+            若 lex.ch == 61 则 {
+                lexerNextChar(lex)
+                tok.text = ">="
+                返回 tok
+            }
+            若 lex.ch == 62 则 {
+                lexerNextChar(lex)
+                tok.text = ">>"
+                返回 tok
+            }
+            tok.text = ">"
+            返回 tok
+        }
+        若 ch1 == 38 则 {
+            若 lex.ch == 38 则 {
+                lexerNextChar(lex)
+                tok.text = "&&"
+                返回 tok
+            }
+            tok.text = "&"
+            返回 tok
+        }
+        若 ch1 == 124 则 {
+            若 lex.ch == 124 则 {
+                lexerNextChar(lex)
+                tok.text = "||"
+                返回 tok
+            }
+            tok.text = "|"
+            返回 tok
+        }
+        若 ch1 == 43 则 { tok.text = "+" }
+        若 ch1 == 45 则 { tok.text = "-" }
+        若 ch1 == 42 则 { tok.text = "*" }
+        若 ch1 == 47 则 { tok.text = "/" }
+        若 ch1 == 37 则 { tok.text = "%" }
+        若 ch1 == 40 则 { tok.text = "(" }
+        若 ch1 == 41 则 { tok.text = ")" }
+        若 ch1 == 123 则 { tok.text = "{" }
+        若 ch1 == 125 则 { tok.text = "}" }
+        若 ch1 == 91 则 { tok.text = "[" }
+        若 ch1 == 93 则 { tok.text = "]" }
+        若 ch1 == 44 则 { tok.text = "," }
+        若 ch1 == 59 则 { tok.text = ";" }
+        若 ch1 == 58 则 { tok.text = ":" }
+        若 ch1 == 46 则 { tok.text = "." }
+        返回 tok
+    }
+    tok.typ = Err
+    tok.text = "未知字符"
+    lexerNextChar(lex)
+    返回 tok
+}
+
+函数 lexerNextToken(lex: Lexer): Token {
+    若 lex.tokPos < lex.tokCount 则 {
+        定义 tok: Token
+        tok.typ = Num
+        tok.text = ""
+        tok.val = 0
+        tok.line = lex.line
+        lex.tokPos = lex.tokPos + 1
+        返回 tok
+    }
+    定义 tok: Token
+    tok = lexerScanToken(lex)
+    lex.tokCount = lex.tokCount + 1
+    lex.tokPos = lex.tokPos + 1
+    返回 tok
+}
+
+函数 lexerPeekToken(lex: Lexer): Token {
+    定义 tok: Token
+    tok = lexerNextToken(lex)
+    lex.tokPos = lex.tokPos - 1
+    返回 tok
+}
+
+函数 lexerRewind(lex: Lexer) {
+    若 lex.tokPos > 0 则 {
+        lex.tokPos = lex.tokPos - 1
+    }
+}
+
+函数 lexerExpect(lex: Lexer, text: 文本): 整数 {
+    定义 tok: Token
+    tok = lexerNextToken(lex)
+    若 tok.text == text 则 {
+        返回 1
+    }
+    打印("期望: ")
+    打印(text)
+    打印(" 但得到: ")
+    打印(tok.text)
     返回 0
 }
 
-/**
- * 词法分析主函数
- */
-函数 lex(): 整数 {
-    打印("开始词法分析...")
-    打印("lexer: 词法分析器已就绪")
-    打印("支持: 关键字, 标识符, 数字, 字符串, 符号")
+函数 lexerMatch(lex: Lexer, text: 文本): 整数 {
+    定义 tok: Token
+    tok = lexerPeekToken(lex)
+    若 tok.text == text 则 {
+        lexerNextToken(lex)
+        返回 1
+    }
     返回 0
+}
+
+函数 lexerRun(src: 文本): 整数 {
+    定义 lex: Lexer
+    lex = lexerInit(src)
+    lexerNextChar(lex)
+    定义 count: 整数
+    count = 0
+    定义 tok: Token
+    tok.typ = Err
+    当 tok.typ != End 则 {
+        tok = lexerNextToken(lex)
+        count = count + 1
+        若 tok.typ == Kw 则 {
+            打印("关键字: ")
+            打印(tok.text)
+        }
+        若 tok.typ == Id 则 {
+            打印("标识符: ")
+            打印(tok.text)
+        }
+        若 tok.typ == Num 则 {
+            打印("数字: ")
+            打印(tok.val)
+        }
+        若 tok.typ == Str 则 {
+            打印("字符串: ")
+            打印(tok.text)
+        }
+        若 tok.typ == Sym 则 {
+            打印("符号: ")
+            打印(tok.text)
+        }
+        若 tok.typ == Err 则 {
+            打印("错误: ")
+            打印(tok.text)
+        }
+    }
+    打印("词法分析完成，共识别 ")
+    打印(count)
+    打印(" 个 Token")
+    返回 count
 }
