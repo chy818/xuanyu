@@ -2,12 +2,6 @@
 
 **玄语** 是一门以中文为原生语法的编译型编程语言，基于 LLVM 构建，支持自举编译。
 
-[!\[Build Status\](https://img.shields.io/badge/build-passing-brightgreen null)]()
-[!\[Rust Version\](https://img.shields.io/badge/rust-1.70%2B-orange null)]()
-[!\[LLVM Version\](https://img.shields.io/badge/llvm-16%2B-blue null)]()
-
-> 🚧 **项目状态**：Work In Progress (Alpha) 
-
 > 本项目原名 ZHCC，现正式更名为「玄语」。代码处于早期阶段，架构可能随时调整。欢迎提 Issue 或 PR 共同完善！
 
 ---
@@ -140,7 +134,7 @@ xuanyu/
 }
 
 // 计数循环
-计数循环 i 从 0 到 10 {
+循环 i 从 0 到 10 {
     打印(i)
 }
 ```

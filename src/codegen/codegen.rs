@@ -383,32 +383,23 @@ impl CodeGenerator {
         
         // 先处理导入模块
         for import in &module.imports {
-            // 输出调试信息
-            eprintln!("正在加载导入模块: {}", import.module_path);
-            
             let imported_module = self.load_imported_module(&import.module_path, processed_modules)?;
-            eprintln!("  - 导入模块函数数量: {}", imported_module.functions.len());
-            
+
             // 递归收集导入模块的函数
             let imported_functions = self.collect_all_functions(&imported_module, collected_names, processed_modules)?;
-            eprintln!("  - 递归收集到 {} 个函数", imported_functions.len());
-            
+
             // 直接添加递归返回的函数（递归调用已经去重并添加到 collected_names 了）
             all_functions.extend(imported_functions);
         }
-        
+
         // 添加当前模块的函数（去重）
         for func in &module.functions {
             if !collected_names.contains(&func.name) {
-                eprintln!("添加当前模块函数: {}", func.name);
                 collected_names.insert(func.name.clone());
                 all_functions.push(func.clone());
-            } else {
-                eprintln!("跳过当前模块重复函数: {}", func.name);
             }
         }
-        
-        eprintln!("collect_all_functions 返回 {} 个函数", all_functions.len());
+
         Ok(all_functions)
     }
 
@@ -507,9 +498,7 @@ impl CodeGenerator {
         self.emit("");
 
         // 生成每个函数的 IR（包括导入模块的函数）
-        eprintln!("准备生成 {} 个函数的 IR", all_functions.len());
-        for (i, func) in all_functions.iter().enumerate() {
-            eprintln!("生成函数 {}/{}: {}", i+1, all_functions.len(), func.name);
+        for func in all_functions.iter() {
             self.generate_function(func)?;
         }
 

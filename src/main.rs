@@ -6,19 +6,30 @@
 
 use std::env;
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::process::{Command, exit};
 
-fn main() {
-    // 设置标准输出为 UTF-8
-    // Windows 上默认控制台编码可能是 GBK/CP936
-    #[cfg(target_os = "windows")]
-    {
-        // 尝试设置 UTF-8 模式
-        use std::io;
-        let _ = io::stdout().write(&[]);  // 确保 stdout 初始化
+#[cfg(target_os = "windows")]
+fn setup_windows_console() {
+    // 调用 Windows API 设置控制台代码页为 UTF-8
+    unsafe {
+        extern "system" {
+            fn SetConsoleOutputCP(wCodePageID: u32) -> u32;
+            fn SetConsoleCP(wCodePageID: u32) -> u32;
+        }
+        SetConsoleOutputCP(65001);
+        SetConsoleCP(65001);
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn setup_windows_console() {
+    // 非 Windows 系统不需要设置
+}
+
+fn main() {
+    // 在任何输出之前设置控制台模式
+    setup_windows_console();
     
     let args: Vec<String> = env::args().collect();
 
