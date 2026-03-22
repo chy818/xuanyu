@@ -10,11 +10,151 @@
 引入 "src/compiler_v2/codegen.xy"
 引入 "src/compiler_v2/runtime.xy"
 
-/* ============ 编译器结构 ============ */
+/* ============ 编译器选项结构 ============ */
 
-结构体 CompileStage {
-    name: 文本,
-    status: 整数      // 0=pending, 1=running, 2=done, 3=error
+结构体 CompileOptions {
+    输入文件: 文本,
+    输出文件: 文本,
+    生成IR: 整数,
+    运行程序: 整数,
+    显示帮助: 整数,
+    显示版本: 整数,
+    优化级别: 整数,
+    目标平台: 文本
+}
+
+/* ============ 选项解析 ============ */
+
+/**
+ * 解析命令行选项
+ */
+函数 parseArgs(argc: 整数, argv: 列表): CompileOptions {
+    定义 opts: CompileOptions
+    opts.输入文件 = ""
+    opts.输出文件 = ""
+    opts.生成IR = 0
+    opts.运行程序 = 0
+    opts.显示帮助 = 0
+    opts.显示版本 = 0
+    opts.优化级别 = 0
+    opts.目标平台 = "x86_64-pc-windows-msvc"
+
+    若 argc <= 1 则 {
+        opts.显示帮助 = 1
+        返回 opts
+    }
+
+    定义 i: 整数
+    i = 1
+    当 i < argc 则 {
+        定义 arg: 文本
+        arg = 获取参数(i)
+
+        若 arg == "--help" 或 arg == "-h" 则 {
+            opts.显示帮助 = 1
+        } 否则 {
+            若 arg == "--version" 或 arg == "-v" 则 {
+                opts.显示版本 = 1
+            } 否则 {
+                若 arg == "--ir" 则 {
+                    opts.生成IR = 1
+                } 否则 {
+                    若 arg == "--run" 或 arg == "-r" 则 {
+                        opts.运行程序 = 1
+                    } 否则 {
+                        若 arg == "-o" 则 {
+                            i = i + 1
+                            opts.输出文件 = 获取参数(i)
+                        } 否则 {
+                            若 arg == "-O" 则 {
+                                i = i + 1
+                                opts.优化级别 = 1
+                            } 否则 {
+                                若 arg == "--target" 则 {
+                                    i = i + 1
+                                    opts.目标平台 = 获取参数(i)
+                                } 否则 {
+                                    opts.输入文件 = arg
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+
+    返回 opts
+}
+
+/* ============ 文件操作 ============ */
+
+/**
+ * 检查文件是否存在
+ */
+函数 fileExists(path: 文本): 整数 {
+    若 path == "" 则 {
+        返回 0
+    }
+    返回 0
+}
+
+/**
+ * 获取文件扩展名
+ */
+函数 getFileExtension(path: 文本): 文本 {
+    定义 ext: 文本
+    ext = ""
+    若 path == "" 则 {
+        返回 ext
+    }
+    返回 ext
+}
+
+/**
+ * 替换文件扩展名
+ */
+函数 replaceExtension(path: 文本, newExt: 文本): 文本 {
+    定义 result: 文本
+    result = path
+    返回 result
+}
+
+/* ============ 编译错误处理 ============ */
+
+结构体 CompileError {
+    阶段: 文本,
+    行号: 整数,
+    列号: 整数,
+    消息: 文本
+}
+
+/**
+ * 报告编译错误
+ */
+函数 reportError(err: CompileError) {
+    打印("错误: ")
+    打印(err.阶段)
+    若 err.行号 > 0 则 {
+        打印(" (行")
+        打印(err.行号)
+        若 err.列号 > 0 则 {
+            打印(", 列")
+            打印(err.列号)
+        }
+        打印(")")
+    }
+    打印(": ")
+    打印(err.消息)
+}
+
+/**
+ * 报告编译警告
+ */
+函数 reportWarning(msg: 文本) {
+    打印("警告: ")
+    打印(msg)
 }
 
 /* ============ 阶段执行函数 ============ */

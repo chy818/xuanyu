@@ -296,6 +296,246 @@
 }
 
 /**
+ * 生成数组分配 IR
+ */
+函数 codegenArrayAlloca(cg: Codegen, elementType: 文本, numElements: 文本): 文本 {
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 line: 文本
+    line = "%" + result + " = alloca " + elementType + ", i64 %" + numElements
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成数组元素访问 IR
+ */
+函数 codegenArrayAccess(cg: Codegen, arrayPtr: 文本, index: 文本, elementType: 文本): 文本 {
+    定义 ptr: 文本
+    ptr = codegenNewTemp(cg)
+
+    定义 line: 文本
+    line = "%" + ptr + " = getelementptr " + elementType + ", " + elementType + "* %" + arrayPtr + ", i64 %" + index
+    codegenEmit(cg, line)
+
+    定义 value: 文本
+    value = codegenNewTemp(cg)
+    line = "%" + value + " = load " + elementType + ", " + elementType + "* %" + ptr
+    codegenEmit(cg, line)
+
+    返回 value
+}
+
+/**
+ * 生成数组元素存储 IR
+ */
+函数 codegenArrayStore(cg: Codegen, arrayPtr: 文本, index: 文本, value: 文本, elementType: 文本): 无返回 {
+    定义 ptr: 文本
+    ptr = codegenNewTemp(cg)
+
+    定义 line: 文本
+    line = "%" + ptr + " = getelementptr " + elementType + ", " + elementType + "* %" + arrayPtr + ", i64 %" + index
+    codegenEmit(cg, line)
+
+    line = "store " + elementType + " %" + value + ", " + elementType + "* %" + ptr
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成结构体分配 IR
+ */
+函数 codegenStructAlloca(cg: Codegen, structType: 文本): 文本 {
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 line: 文本
+    line = "%" + result + " = alloca " + structType
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成结构体字段访问 IR (使用字段索引)
+ */
+函数 codegenStructFieldAccess(cg: Codegen, structPtr: 文本, fieldIndex: 整数, fieldType: 文本): 文本 {
+    定义 ptr: 文本
+    ptr = codegenNewTemp(cg)
+
+    定义 line: 文本
+    line = "%" + ptr + " = getelementptr " + fieldType + ", " + fieldType + "* %" + structPtr + ", i32 0, i32 " + 整数转文本(fieldIndex)
+    codegenEmit(cg, line)
+
+    定义 value: 文本
+    value = codegenNewTemp(cg)
+    line = "%" + value + " = load " + fieldType + ", " + fieldType + "* %" + ptr
+    codegenEmit(cg, line)
+
+    返回 value
+}
+
+/**
+ * 生成结构体字段存储 IR
+ */
+函数 codegenStructFieldStore(cg: Codegen, structPtr: 文本, fieldIndex: 整数, value: 文本, fieldType: 文本): 无返回 {
+    定义 ptr: 文本
+    ptr = codegenNewTemp(cg)
+
+    定义 line: 文本
+    line = "%" + ptr + " = getelementptr " + fieldType + ", " + fieldType + "* %" + structPtr + ", i32 0, i32 " + 整数转文本(fieldIndex)
+    codegenEmit(cg, line)
+
+    line = "store " + fieldType + " %" + value + ", " + fieldType + "* %" + ptr
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成空指针检查 IR
+ */
+函数 codegenNullCheck(cg: Codegen, ptr: 文本): 文本 {
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 line: 文本
+    line = "%" + result + " = icmp ne i8* %" + ptr + ", null"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成全局变量声明 IR
+ */
+函数 codegenGlobalString(cg: Codegen, strValue: 文本, name: 文本): 文本 {
+    定义 line: 文本
+    line = "@" + name + " = private constant [0 x i8] c\"" + strValue + "\\00\""
+    codegenEmit(cg, line)
+
+    返回 name
+}
+
+/**
+ * 生成全局变量声明 IR (整数)
+ */
+函数 codegenGlobalInt(cg: Codegen, value: 整数, name: 文本): 文本 {
+    定义 line: 文本
+    line = "@" + name + " = global i64 " + 整数转文本(value)
+    codegenEmit(cg, line)
+
+    返回 name
+}
+
+/**
+ * 生成选择性 IR (cond ? then : else)
+ */
+函数 codegenSelect(cg: Codegen, cond: 文本, thenValue: 文本, elseValue: 文本): 文本 {
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 line: 文本
+    line = "%" + result + " = select i1 %" + cond + ", i64 %" + thenValue + ", i64 %" + elseValue
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 unreachable 指令 IR
+ */
+函数 codegenUnreachable(cg: Codegen): 无返回 {
+    codegenEmit(cg, "unreachable")
+}
+
+/**
+ * 生成 switch 指令 IR (用于 match 语句)
+ */
+函数 codegenSwitch(cg: Codegen, value: 文本, defaultLabel: 文本, numCases: 整数) {
+    定义 line: 文本
+    line = "switch i64 %" + value + ", label %" + defaultLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 case 分支 IR
+ */
+函数 codegenCase(cg: Codegen, caseValue: 文本, caseLabel: 文本) {
+    定义 line: 文本
+    line = "i64 " + caseValue + ", label %" + caseLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 match 语句 IR
+ */
+函数 codegenMatch(cg: Codegen, subjectValue: 文本, caseCount: 整数, hasDefault: 整数): 文本 {
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 endLabel: 文本
+    endLabel = codegenNewLabel(cg)
+
+    定义 defaultLabel: 文本
+    defaultLabel = codegenNewLabel(cg)
+
+    定义 line: 文本
+    line = "switch i64 %" + subjectValue + ", label %" + defaultLabel
+    codegenEmit(cg, line)
+
+    定义 i: 整数
+    i = 0
+    当 i < caseCount 则 {
+        定义 caseLabel: 文本
+        caseLabel = codegenNewLabel(cg)
+        line = "i64 " + 整数转文本(i) + ", label %" + caseLabel
+        codegenEmit(cg, line)
+        i = i + 1
+    }
+
+    /* 默认标签 */
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, defaultLabel + ":")
+    cg.indent = cg.indent + 1
+
+    若 hasDefault == 0 则 {
+        codegenEmit(cg, "unreachable")
+    }
+
+    /* 结束标签 */
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, endLabel + ":")
+    cg.indent = cg.indent + 1
+
+    返回 result
+}
+
+/**
+ * 生成 phi 节点 IR (用于 match 分支的值合并)
+ */
+函数 codegenPhi(cg: Codegen, numValues: 整数): 文本 {
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 line: 文本
+    line = "%" + result + " = phi i64"
+    定义 i: 整数
+    i = 0
+    当 i < numValues 则 {
+        定义 label: 文本
+        label = codegenNewLabel(cg)
+        line = line + " [%tmp" + 整数转文本(i) + ", %L" + 整数转文本(i) + "]"
+        若 i < numValues - 1 则 {
+            line = line + ","
+        }
+        i = i + 1
+    }
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
  * 生成 if 语句 IR
  */
 函数 codegenIf(cg: Codegen, condVar: 文本, thenLabel: 文本, elseLabel: 文本, endLabel: 文本) {
