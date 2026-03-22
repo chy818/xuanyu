@@ -2359,6 +2359,447 @@
     打印(funcName)
 }
 
+/* ============ AST 遍历核心入口 ============ */
+
+/**
+ * 遍历 AST 根节点生成完整 IR
+ */
+函数 codegen遍历AST(ast: AST节点): 文本 {
+    定义 cg: Codegen
+    cg = codegenInit()
+
+    打印("=== 开始 AST 遍历 ===")
+
+    定义 line: 文本
+    line = "; Module: xuanyu_program"
+    codegenEmit(cg, line)
+
+    /* 生成目标数据 */
+    emitTargetData(cg)
+
+    /* 生成内置函数声明 */
+    emitBuiltinDecls(cg)
+
+    /* 遍历顶层声明 */
+    定义 i: 整数
+    i = 0
+    当 i < 100 且 ast.children[i] != ast.children[0] 则 {
+        定义 child: AST节点
+        child = ast.children[i]
+
+        若 child.kind == 5 则 {
+            codegen遍历函数定义(cg, child)
+        } 否则 {
+            若 child.kind == 27 则 {
+                codegen遍历模块定义(cg, child)
+            }
+        }
+        i = i + 1
+    }
+
+    /* 生成 main 包装 */
+    emitMainWrapper(cg)
+
+    打印("=== AST 遍历完成 ===")
+
+    返回 cg.源码
+}
+
+/**
+ * 遍历函数定义
+ */
+函数 codegen遍历函数定义(cg: Codegen, funcNode: AST节点): 无返回 {
+    定义 funcName: 文本
+    funcName = funcNode.name
+
+    定义 returnType: 文本
+    returnType = "i64"
+
+    打印("生成函数: ")
+    打印(funcName)
+
+    /* 生成函数头 */
+    codegenEmit(cg, "")
+    codegenEmit(cg, "define " + returnType + " @" + funcName + "() {")
+
+    /* 生成函数体 */
+    定义 body: AST节点
+    body = funcNode.children
+
+    若 body.kind == 8 则 {
+        /* 块语句 */
+        codegen遍历块语句(cg, body)
+    } 否则 {
+        /* 单表达式函数体 */
+        定义 result: 文本
+        result = codegen遍历表达式(cg, body)
+        codegenEmit(cg, "  ret i64 %" + result)
+    }
+
+    codegenEmit(cg, "}")
+}
+
+/**
+ * 遍历块语句
+ */
+函数 codegen遍历块语句(cg: Codegen, block: AST节点): 无返回 {
+    定义 i: 整数
+    i = 0
+
+    打印("遍历块语句, children=")
+    打印(列表长度(block.children))
+
+    当 i < 列表长度(block.children) 且 i < 50 则 {
+        定义 stmt: AST节点
+        stmt = block.children[i]
+
+        codegen遍历语句(cg, stmt)
+
+        i = i + 1
+    }
+}
+
+/**
+ * 遍历语句
+ */
+函数 codegen遍历语句(cg: Codegen, stmt: AST节点): 无返回 {
+    若 stmt.kind == 2 则 {
+        /* 变量定义 */
+        codegen遍历变量定义(cg, stmt)
+    } 否则 {
+        若 stmt.kind == 3 则 {
+            /* 函数调用表达式 */
+            定义 result: 文本
+            result = codegen遍历表达式(cg, stmt)
+        } 否则 {
+            若 stmt.kind == 6 则 {
+                /* if 语句 */
+                codegen遍历If语句(cg, stmt)
+            } 否则 {
+                若 stmt.kind == 7 则 {
+                    /* while 语句 */
+                    codegen遍历While语句(cg, stmt)
+                } 否则 {
+                    若 stmt.kind == 8 则 {
+                        /* for 语句 */
+                        codegen遍历For语句(cg, stmt)
+                    } 否则 {
+                        若 stmt.kind == 4 则 {
+                            /* return 语句 */
+                            codegen遍历返回语句(cg, stmt)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 遍历变量定义
+ */
+函数 codegen遍历变量定义(cg: Codegen, varNode: AST节点): 无返回 {
+    定义 varName: 文本
+    varName = varNode.name
+
+    打印("生成变量: ")
+    打印(varName)
+
+    /* 分配空间 */
+    定义 ptr: 文本
+    ptr = varName + "_slot"
+    codegenEmit(cg, "  %" + ptr + " = alloca i64")
+
+    /* 初始化 */
+    若 varNode.children.kind != 0 则 {
+        定义 initVal: 文本
+        initVal = codegen遍历表达式(cg, varNode.children)
+        codegenEmit(cg, "  store i64 %" + initVal + ", i64* %" + ptr)
+    }
+}
+
+/**
+ * 遍历 if 语句
+ */
+函数 codegen遍历If语句(cg: Codegen, ifNode: AST节点): 无返回 {
+    定义 thenLabel: 文本
+    thenLabel = codegenNewLabel(cg)
+    定义 elseLabel: 文本
+    elseLabel = codegenNewLabel(cg)
+    定义 endLabel: 文本
+    endLabel = codegenNewLabel(cg)
+
+    /* 条件表达式 */
+    定义 cond: AST节点
+    cond = ifNode.children
+    定义 condVar: 文本
+    condVar = codegen遍历表达式(cg, cond)
+
+    /* 条件跳转 */
+    codegenEmit(cg, "  br i1 %" + condVar + ", label %" + thenLabel + ", label %" + elseLabel)
+
+    /* then 块 */
+    codegenEmit(cg, thenLabel + ":")
+    定义 thenBlock: AST节点
+    thenBlock = ifNode.value
+    codegen遍历块语句(cg, thenBlock)
+    codegenEmit(cg, "  br label %" + endLabel)
+
+    /* else 块 */
+    codegenEmit(cg, elseLabel + ":")
+    若 ifNode.name != "" 则 {
+        定义 elseBlock: AST节点
+        elseBlock = ifNode.name
+        codegen遍历块语句(cg, elseBlock)
+    }
+    codegenEmit(cg, "  br label %" + endLabel)
+
+    /* 结束 */
+    codegenEmit(cg, endLabel + ":")
+}
+
+/**
+ * 遍历 while 语句
+ */
+函数 codegen遍历While语句(cg: Codegen, whileNode: AST节点): 无返回 {
+    定义 condLabel: 文本
+    condLabel = codegenNewLabel(cg)
+    定义 bodyLabel: 文本
+    bodyLabel = codegenNewLabel(cg)
+    定义 endLabel: 文本
+    endLabel = codegenNewLabel(cg)
+
+    /* 跳转到条件 */
+    codegenEmit(cg, "  br label %" + condLabel)
+
+    /* 条件 */
+    codegenEmit(cg, condLabel + ":")
+    定义 cond: AST节点
+    cond = whileNode.children
+    定义 condVar: 文本
+    condVar = codegen遍历表达式(cg, cond)
+
+    /* 条件跳转 */
+    codegenEmit(cg, "  br i1 %" + condVar + ", label %" + bodyLabel + ", label %" + endLabel)
+
+    /* 循环体 */
+    codegenEmit(cg, bodyLabel + ":")
+    定义 body: AST节点
+    body = whileNode.value
+    codegen遍历块语句(cg, body)
+    codegenEmit(cg, "  br label %" + condLabel)
+
+    /* 结束 */
+    codegenEmit(cg, endLabel + ":")
+}
+
+/**
+ * 遍历 for 语句
+ */
+函数 codegen遍历For语句(cg: Codegen, forNode: AST节点): 无返回 {
+    定义 initLabel: 文本
+    initLabel = codegenNewLabel(cg)
+    定义 condLabel: 文本
+    condLabel = codegenNewLabel(cg)
+    定义 bodyLabel: 文本
+    bodyLabel = codegenNewLabel(cg)
+    定义 incLabel: 文本
+    incLabel = codegenNewLabel(cg)
+    定义 endLabel: 文本
+    endLabel = codegenNewLabel(cg)
+
+    /* 初始化 */
+    codegenEmit(cg, "  br label %" + initLabel)
+    codegenEmit(cg, initLabel + ":")
+
+    定义 init: AST节点
+    init = forNode.children
+    codegen遍历表达式(cg, init)
+
+    /* 跳转到条件 */
+    codegenEmit(cg, "  br label %" + condLabel)
+
+    /* 条件 */
+    codegenEmit(cg, condLabel + ":")
+    定义 cond: AST节点
+    cond = forNode.value
+    定义 condVar: 文本
+    condVar = codegen遍历表达式(cg, cond)
+
+    /* 条件跳转 */
+    codegenEmit(cg, "  br i1 %" + condVar + ", label %" + bodyLabel + ", label %" + endLabel)
+
+    /* 循环体 */
+    codegenEmit(cg, bodyLabel + ":")
+    定义 body: AST节点
+    body = forNode.name
+    codegen遍历块语句(cg, body)
+    codegenEmit(cg, "  br label %" + incLabel)
+
+    /* 递增 */
+    codegenEmit(cg, incLabel + ":")
+    定义 inc: AST节点
+    inc = forNode.value
+    codegen遍历表达式(cg, inc)
+    codegenEmit(cg, "  br label %" + condLabel)
+
+    /* 结束 */
+    codegenEmit(cg, endLabel + ":")
+}
+
+/**
+ * 遍历返回语句
+ */
+函数 codegen遍历返回语句(cg: Codegen, retNode: AST节点): 无返回 {
+    若 retNode.children.kind != 0 则 {
+        定义 result: 文本
+        result = codegen遍历表达式(cg, retNode.children)
+        codegenEmit(cg, "  ret i64 %" + result)
+    } 否则 {
+        codegenEmit(cg, "  ret void")
+    }
+}
+
+/**
+ * 遍历表达式
+ */
+函数 codegen遍历表达式(cg: Codegen, expr: AST节点): 文本 {
+    定义 result: 文本
+    result = ""
+
+    若 expr.kind == 0 则 {
+        /* 标识符 */
+        result = codegen遍历标识符(cg, expr.name)
+    } 否则 {
+        若 expr.kind == 14 则 {
+            /* 字面量 */
+            result = codegen遍历字面量(cg, expr.value)
+        } 否则 {
+            若 expr.kind == 10 则 {
+                /* 二元表达式 */
+                result = codegen遍历二元表达式(cg, expr.name, expr.children, expr.value)
+            } 否则 {
+                若 expr.kind == 11 则 {
+                    /* 一元表达式 */
+                    result = codegen遍历一元表达式(cg, expr.name, expr.children)
+                } 否则 {
+                    若 expr.kind == 3 则 {
+                        /* 函数调用 */
+                        result = codegen遍历函数调用(cg, expr.name, expr.children)
+                    } 否则 {
+                        /* 默认: 返回临时变量 */
+                        result = codegenNewTemp(cg)
+                    }
+                }
+            }
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 遍历标识符
+ */
+函数 codegen遍历标识符(cg: Codegen, name: 文本): 文本 {
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    codegenEmit(cg, "  %" + result + " = load i64, i64* %" + name + "_slot")
+
+    返回 result
+}
+
+/**
+ * 遍历字面量
+ */
+函数 codegen遍历字面量(cg: Codegen, value: 文本): 文本 {
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    codegenEmit(cg, "  %" + result + " = add i64 0, " + value)
+
+    返回 result
+}
+
+/**
+ * 遍历二元表达式
+ */
+函数 codegen遍历二元表达式(cg: Codegen, op: 文本, left: AST节点, right: AST节点): 文本 {
+    定义 leftVal: 文本
+    leftVal = codegen遍历表达式(cg, left)
+
+    定义 rightVal: 文本
+    rightVal = codegen遍历表达式(cg, right)
+
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 llOp: 文本
+    llOp = "add"
+
+    若 op == "+" 则 { llOp = "add" }
+    若 op == "-" 则 { llOp = "sub" }
+    若 op == "*" 则 { llOp = "mul" }
+    若 op == "/" 则 { llOp = "sdiv" }
+    若 op == "%" 则 { llOp = "srem" }
+
+    codegenEmit(cg, "  %" + result + " = " + llOp + " i64 %" + leftVal + ", %" + rightVal)
+
+    返回 result
+}
+
+/**
+ * 遍历一元表达式
+ */
+函数 codegen遍历一元表达式(cg: Codegen, op: 文本, operand: AST节点): 文本 {
+    定义 operandVal: 文本
+    operandVal = codegen遍历表达式(cg, operand)
+
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    若 op == "-" 则 {
+        codegenEmit(cg, "  %" + result + " = sub i64 0, %" + operandVal)
+    } 否则 {
+        若 op == "!" 则 {
+            codegenEmit(cg, "  %" + result + " = xor i1 %" + operandVal + ", true")
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 遍历函数调用
+ */
+函数 codegen遍历函数调用(cg: Codegen, funcName: 文本, args: AST节点): 文本 {
+    定义 result: 文本
+    result = codegenNewTemp(cg)
+
+    codegenEmit(cg, "  %" + result + " = call i64 @" + funcName + "()")
+
+    返回 result
+}
+
+/**
+ * 遍历模块定义
+ */
+函数 codegen遍历模块定义(cg: Codegen, module: AST节点): 无返回 {
+    打印("遍历模块: ")
+    打印(module.name)
+}
+
+/**
+ * 生成新标签
+ */
+函数 codegenNewLabel(cg: Codegen): 文本 {
+    cg.标签计数 = cg.标签计数 + 1
+    定义 label: 文本
+    label = "L" + 整数转文本(cg.标签计数)
+    返回 label
+}
+
 /* ============ AST 遍历和 IR 生成 ============ */
 
 /**
