@@ -1,152 +1,735 @@
 /**
  * @file lexer.xy
  * @brief 词法分析器 - 自展编译器
- * @description 简化版词法扫描功能
+ * @description 完整的词法扫描功能，支持 token 列表构建
  */
 
-枚举 Tok { Kw, Id, Num, Str, Sym, End, Err }
+/* ============ Token 类型枚举 ============ */
+
+枚举 TokenType {
+    标识符,     // 0 - Id - 标识符
+    数字,       // 1 - Num - 数字字面量
+    字符串,     // 2 - Str - 字符串字面量
+    关键字,     // 3 - Kw - 关键字
+    运算符,     // 4 - Op - 运算符
+    符号,       // 5 - Sym - 符号
+    结束,       // 6 - Eof - 文件结束
+    注释,       // 7 - Comment - 注释
+    字符,       // 8 - Char - 字符字面量
+    赋值,       // 9 - Assign - 赋值运算符
+    比较,       // 10 - Compare - 比较运算符
+    逻辑,       // 11 - Logical - 逻辑运算符
+    错误        // 12 - Error - 错误
+}
+
+/* ============ Token 结构 ============ */
 
 结构体 Token {
-    typ: Tok,
-    val: 整数,
-    line: 整数
+    类型: 整数,      // TokenType
+    值: 文本,        // token 文本值
+    行号: 整数,      // 所在行
+    列号: 整数,      // 所在列
+    开始位置: 整数,  // 在源码中的开始位置
+    结束位置: 整数   // 在源码中的结束位置
 }
+
+/* ============ Lexer 状态 ============ */
 
 结构体 Lexer {
-    src: 文本,
-    pos: 整数,
-    line: 整数,
-    ch: 整数,
-    tokenCount: 整数
+    源码: 文本,
+    位置: 整数,
+    长度: 整数,
+    行号: 整数,
+    列号: 整数,
+    当前字符: 整数,
+    token列表: 列表,
+    开始位置: 整数
 }
 
-函数 isSpace(ch: 整数): 整数 {
+/* ============ 字符分类函数 ============ */
+
+/**
+ * 判断是否为空白字符
+ */
+函数 是空白(ch: 整数): 整数 {
     若 ch == 32 则 { 返回 1 }
-    若 ch == 9 则 { 返回 1 }
+    若 ch == 9  则 { 返回 1 }
     若 ch == 10 则 { 返回 1 }
     若 ch == 13 则 { 返回 1 }
     返回 0
 }
 
-函数 isDigit(ch: 整数): 整数 {
-    若 ch >= 48 则 {
-        若 ch <= 57 则 { 返回 1 }
-    }
-    返回 0
-}
-
-函数 isAlpha(ch: 整数): 整数 {
-    若 ch >= 97 则 {
-        若 ch <= 122 则 { 返回 1 }
-    }
-    若 ch >= 65 则 {
-        若 ch <= 90 则 { 返回 1 }
-    }
-    若 ch >= 128 则 { 返回 1 }
-    返回 0
-}
-
-函数 isAlnum(ch: 整数): 整数 {
-    若 isAlpha(ch) == 1 则 { 返回 1 }
-    若 isDigit(ch) == 1 则 { 返回 1 }
+/**
+ * 判断是否为字母（包括中文）
+ */
+函数 是字母(ch: 整数): 整数 {
+    若 ch >= 65 且 ch <= 90 则 { 返回 1 }
+    若 ch >= 97 且 ch <= 122 则 { 返回 1 }
+    若 ch >= 0xE4 则 { 返回 1 }
     若 ch == 95 则 { 返回 1 }
     返回 0
 }
 
-函数 lexerInit(src: 文本): Lexer {
+/**
+ * 判断是否为数字
+ */
+函数 是数字(ch: 整数): 整数 {
+    若 ch >= 48 且 ch <= 57 则 { 返回 1 }
+    返回 0
+}
+
+/**
+ * 判断是否为字母或数字
+ */
+函数 是字母或数字(ch: 整数): 整数 {
+    若 是字母(ch) == 1 则 { 返回 1 }
+    若 是数字(ch) == 1 则 { 返回 1 }
+    返回 0
+}
+
+/**
+ * 判断是否为运算符字符
+ */
+函数 是运算符(ch: 整数): 整数 {
+    若 ch == 43 则 { 返回 1 }  // +
+    若 ch == 45 则 { 返回 1 }  // -
+    若 ch == 42 则 { 返回 1 }  // *
+    若 ch == 47 则 { 返回 1 }  // /
+    若 ch == 37 则 { 返回 1 }  // %
+    若 ch == 61 则 { 返回 1 }  // =
+    若 ch == 33 则 { 返回 1 }  // !
+    若 ch == 60 则 { 返回 1 }  // <
+    若 ch == 62 则 { 返回 1 }  // >
+    若 ch == 38 则 { 返回 1 }  // &
+    若 ch == 124 则 { 返回 1 } // |
+    若 ch == 94 则 { 返回 1 }  // ^
+    若 ch == 126 则 { 返回 1 } // ~
+    返回 0
+}
+
+/**
+ * 判断是否为符号字符
+ */
+函数 是符号(ch: 整数): 整数 {
+    若 ch == 40 则 { 返回 1 }  // (
+    若 ch == 41 则 { 返回 1 }  // )
+    若 ch == 123 则 { 返回 1 } // {
+    若 ch == 125 则 { 返回 1 } // }
+    若 ch == 91 则 { 返回 1 }  // [
+    若 ch == 93 则 { 返回 1 }  // ]
+    若 ch == 59 则 { 返回 1 }  // ;
+    若 ch == 58 则 { 返回 1 }  // :
+    若 ch == 44 则 { 返回 1 }  // ,
+    若 ch == 46 则 { 返回 1 }  // .
+    若 ch == 34 则 { 返回 1 }  // "
+    若 ch == 39 则 { 返回 1 }  // '
+    若 ch == 10 则 { 返回 1 }  // 换行符
+    返回 0
+}
+
+/**
+ * 判断是否为比较运算符起始字符
+ */
+函数 是比较起始(ch: 整数): 整数 {
+    若 ch == 61 则 { 返回 1 }  // =
+    若 ch == 33 则 { 返回 1 }  // !
+    若 ch == 60 则 { 返回 1 }  // <
+    若 ch == 62 则 { 返回 1 }  // >
+    返回 0
+}
+
+/* ============ 关键字识别 ============ */
+
+/**
+ * 判断是否为关键字
+ */
+函数 是关键字(text: 文本): 整数 {
+    若 text == "若" 则 { 返回 1 }
+    若 text == "则" 则 { 返回 1 }
+    若 text == "否则" 则 { 返回 1 }
+    若 text == "当" 则 { 返回 1 }
+    若 text == "循环" 则 { 返回 1 }
+    若 text == "从" 则 { 返回 1 }
+    若 text == "到" 则 { 返回 1 }
+    若 text == "返回" 则 { 返回 1 }
+    若 text == "定义" 则 { 返回 1 }
+    若 text == "函数" 则 { 返回 1 }
+    若 text == "结构体" 则 { 返回 1 }
+    若 text == "枚举" 则 { 返回 1 }
+    若 text == "真" 则 { 返回 1 }
+    若 text == "假" 则 { 返回 1 }
+    若 text == "跳过" 则 { 返回 1 }
+    若 text == "退出" 则 { 返回 1 }
+    若 text == "整数" 则 { 返回 1 }
+    若 text == "浮点数" 则 { 返回 1 }
+    若 text == "双精度" 则 { 返回 1 }
+    若 text == "布尔" 则 { 返回 1 }
+    若 text == "文本" 则 { 返回 1 }
+    若 text == "无返回" 则 { 返回 1 }
+    若 text == "字符" 则 { 返回 1 }
+    若 text == "指针" 则 { 返回 1 }
+    若 text == "列表" 则 { 返回 1 }
+    若 text == "长整数" 则 { 返回 1 }
+    若 text == "引入" 则 { 返回 1 }
+    若 text == "模块" 则 { 返回 1 }
+    若 text == "导出" 则 { 返回 1 }
+    若 text == "尝试" 则 { 返回 1 }
+    若 text == "捕获" 则 { 返回 1 }
+    若 text == "最终" 则 { 返回 1 }
+    若 text == "匹配" 则 { 返回 1 }
+    若 text == "情况" 则 { 返回 1 }
+    若 text == "默认" 则 { 返回 1 }
+    若 text == "常量" 则 { 返回 1 }
+    若 text == "静态" 则 { 返回 1 }
+    若 text == "外部" 则 { 返回 1 }
+    若 text == "异步" 则 { 返回 1 }
+    若 text == "等待" 则 { 返回 1 }
+    若 text == "启动" 则 { 返回 1 }
+    若 text == "类型别名" 则 { 返回 1 }
+    若 text == "联合" 则 { 返回 1 }
+    若 text == "公开" 则 { 返回 1 }
+    若 text == "私有" 则 { 返回 1 }
+    若 text == "可变" 则 { 返回 1 }
+    若 text == "借用" 则 { 返回 1 }
+    若 text == "拥有" 则 { 返回 1 }
+    若 text == "手动" 则 { 返回 1 }
+    若 text == "原生" 则 { 返回 1 }
+    若 text == "直到" 则 { 返回 1 }
+    若 text == "取自" 则 { 返回 1 }
+    若 text == "遍历" 则 { 返回 1 }
+    若 text == "在" 则 { 返回 1 }
+    返回 0
+}
+
+/* ============ 字符串切片函数 ============ */
+
+/**
+ * 提取子字符串
+ * 使用运行时函数文本切片
+ */
+函数 提取子串(源码: 文本, 开始: 整数, 结束: 整数): 文本 {
+    定义 结果: 文本
+    结果 = 文本切片(源码, 开始, 结束)
+    返回 结果
+}
+
+/* ============ Lexer 核心函数 ============ */
+
+/**
+ * 获取字符
+ */
+函数 获取字符(lex: Lexer): 整数 {
+    若 lex.位置 < lex.长度 则 {
+        定义 ch: 整数
+        ch = lex.源码[lex.位置]
+        返回 ch
+    }
+    返回 0
+}
+
+/**
+ * 初始化词法分析器
+ */
+函数 lexerInit(源码: 文本): Lexer {
     定义 lex: Lexer
-    lex.src = src
-    lex.pos = 0
-    lex.line = 1
-    lex.ch = 0
-    lex.tokenCount = 0
+    lex.源码 = 源码
+    lex.位置 = 0
+    lex.长度 = 文本长度(源码)
+    lex.行号 = 1
+    lex.列号 = 1
+    lex.开始位置 = 0
+    lex.当前字符 = 获取字符(lex)
+    lex.token列表 = 列表()
     返回 lex
 }
 
-函数 lexerGetChar(lex: Lexer): Lexer {
-    定义 i: 整数
-    i = lex.pos
-    定义 ch: 整数
-    ch = 0
-    定义 result: Lexer
-    result = lex
-    若 i < 1000 则 {
-        ch = 0
+/**
+ * 前进到下一个字符
+ */
+函数 lexer前进(lex: Lexer): Lexer {
+    lex.位置 = lex.位置 + 1
+    lex.列号 = lex.列号 + 1
+
+    若 lex.位置 < lex.长度 则 {
+        lex.当前字符 = lex.源码[lex.位置]
+    } 否则 {
+        lex.当前字符 = 0
     }
-    result.ch = ch
-    若 ch == 10 则 {
-        result.line = result.line + 1
+
+    若 lex.当前字符 == 10 则 {
+        lex.行号 = lex.行号 + 1
+        lex.列号 = 1
     }
-    result.pos = lex.pos + 1
-    返回 result
+
+    返回 lex
 }
 
-函数 lexerSkipWhitespace(lex: Lexer): Lexer {
-    定义 result: Lexer
-    result = lex
-    当 isSpace(result.ch) == 1 则 {
-        result = lexerGetChar(result)
+/**
+ * 跳过空白字符
+ */
+函数 lexer跳过空白(lex: Lexer): Lexer {
+    当 是空白(lex.当前字符) == 1 则 {
+        lex = lexer前进(lex)
     }
-    返回 result
+    lex.开始位置 = lex.位置
+    返回 lex
 }
 
-函数 lexerScanToken(lex: Lexer): Lexer {
-    定义 result: Lexer
-    result = lexerSkipWhitespace(lex)
-
+/**
+ * 读取注释
+ */
+函数 lexer读取注释(lex: Lexer): Token {
     定义 tok: Token
-    tok.line = result.line
-    tok.val = 0
+    定义 开始: 整数
+    开始 = lex.开始位置
 
-    若 result.ch == 0 则 {
-        tok.typ = End
-        返回 result
-    }
-    若 isDigit(result.ch) == 1 则 {
-        tok.typ = Num
-        tok.val = 0
-        当 isDigit(result.ch) == 1 则 {
-            tok.val = tok.val * 10 + (result.ch - 48)
-            result = lexerGetChar(result)
+    tok.类型 = 7  // 注释
+    tok.值 = ""
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+    tok.开始位置 = 开始
+
+    // 检查是 // 还是 /*
+    若 lex.当前字符 == 47 则 {  // /
+        定义 nextCh: 整数
+        nextCh = lex.源码[lex.位置 + 1]
+
+        若 nextCh == 47 则 {
+            // 单行注释 // ... 一直到换行
+            当 lex.当前字符 != 10 且 lex.当前字符 != 0 则 {
+                lex = lexer前进(lex)
+            }
+        } 否则 {
+            若 nextCh == 42 则 {
+                // 多行注释 /* ... */
+                lex = lexer前进(lex)  // 跳过 /
+                lex = lexer前进(lex)  // 跳过 *
+                当 lex.当前字符 != 0 则 {
+                    若 lex.当前字符 == 42 且 lex.源码[lex.位置 + 1] == 47 则 {
+                        lex = lexer前进(lex)  // 跳过 *
+                        lex = lexer前进(lex)  // 跳过 /
+                        跳出
+                    }
+                    lex = lexer前进(lex)
+                }
+            }
         }
-        返回 result
-    }
-    若 isAlpha(result.ch) == 1 则 {
-        tok.typ = Id
-        当 isAlnum(result.ch) == 1 则 {
-            result = lexerGetChar(result)
-        }
-        返回 result
     }
 
-    tok.typ = Sym
-    result = lexerGetChar(result)
-    返回 result
+    tok.结束位置 = lex.位置
+
+    // 提取注释内容
+    定义 提取的值: 文本
+    提取的值 = 提取子串(lex.源码, 开始, lex.位置)
+    tok.值 = 提取的值
+
+    返回 tok
 }
 
-函数 lexerRun(src: 文本): 整数 {
+/**
+ * 读取字符字面量
+ */
+函数 lexer读取字符(lex: Lexer): Token {
+    定义 tok: Token
+    定义 开始: 整数
+    开始 = lex.开始位置
+
+    tok.类型 = 8  // 字符
+    tok.值 = ""
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+    tok.开始位置 = 开始
+
+    // 跳过开始的单引号
+    lex = lexer前进(lex)
+
+    // 读取字符内容（支持转义）
+    若 lex.当前字符 == 92 则 {  // 反斜杠 \
+        lex = lexer前进(lex)  // 跳过反斜杠
+        // 处理转义字符
+        若 lex.当前字符 == 110 则 {  // \n
+            lex = lexer前进(lex)
+        } 否则 {
+            若 lex.当前字符 == 116 则 {  // \t
+                lex = lexer前进(lex)
+            } 否则 {
+                若 lex.当前字符 == 92 则 {  // \\
+                    lex = lexer前进(lex)
+                } 否则 {
+                    若 lex.当前字符 == 39 则 {  // \'
+                        lex = lexer前进(lex)
+                    }
+                }
+            }
+        }
+    } 否则 {
+        若 lex.当前字符 != 39 且 lex.当前字符 != 0 则 {
+            lex = lexer前进(lex)
+        }
+    }
+
+    // 跳过结束的单引号
+    若 lex.当前字符 == 39 则 {
+        lex = lexer前进(lex)
+    }
+
+    tok.结束位置 = lex.位置
+
+    // 提取字符值（包括引号）
+    定义 提取的值: 文本
+    提取的值 = 提取子串(lex.源码, 开始, lex.位置)
+    tok.值 = 提取的值
+
+    返回 tok
+}
+
+/**
+ * 读取复合运算符（==, !=, <=, >=, &&, ||）
+ */
+函数 lexer读取复合运算符(lex: Lexer): Token {
+    定义 tok: Token
+    定义 开始: 整数
+    开始 = lex.开始位置
+
+    tok.类型 = 10  // 比较
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+    tok.开始位置 = 开始
+
+    定义 firstCh: 整数
+    firstCh = lex.当前字符
+
+    lex = lexer前进(lex)
+    定义 nextCh: 整数
+    nextCh = lex.当前字符
+
+    定义 op: 文本
+    op = ""
+
+    // 双字符运算符
+    若 firstCh == 61 且 nextCh == 61 则 {
+        op = "=="
+        lex = lexer前进(lex)
+    } 否则 {
+        若 firstCh == 33 且 nextCh == 61 则 {
+            op = "!="
+            lex = lexer前进(lex)
+        } 否则 {
+            若 firstCh == 60 且 nextCh == 61 则 {
+                op = "<="
+                lex = lexer前进(lex)
+            } 否则 {
+                若 firstCh == 62 且 nextCh == 61 则 {
+                    op = ">="
+                    lex = lexer前进(lex)
+                } 否则 {
+                    若 firstCh == 38 且 nextCh == 38 则 {
+                        op = "&&"
+                        tok.类型 = 11  // 逻辑
+                        lex = lexer前进(lex)
+                    } 否则 {
+                        若 firstCh == 124 且 nextCh == 124 则 {
+                            op = "||"
+                            tok.类型 = 11  // 逻辑
+                            lex = lexer前进(lex)
+                        } 否则 {
+                            // 单字符运算符
+                            若 firstCh == 61 则 { op = "=" }
+                            若 firstCh == 60 则 { op = "<" }
+                            若 firstCh == 62 则 { op = ">" }
+                            若 firstCh == 33 则 { op = "!" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tok.结束位置 = lex.位置
+    tok.值 = op
+
+    返回 tok
+}
+
+/**
+ * 读取标识符或关键字
+ */
+函数 lexer读取标识符(lex: Lexer): Token {
+    定义 tok: Token
+    定义 开始: 整数
+    开始 = lex.开始位置
+
+    tok.类型 = 0
+    tok.值 = ""
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+    tok.开始位置 = 开始
+
+    当 是字母或数字(lex.当前字符) == 1 则 {
+        lex = lexer前进(lex)
+    }
+
+    tok.结束位置 = lex.位置
+
+    // 使用文本切片提取实际 token 值
+    定义 提取的值: 文本
+    提取的值 = 提取子串(lex.源码, 开始, lex.位置)
+    tok.值 = 提取的值
+
+    // 检查是否为关键字
+    若 是关键字(提取的值) == 1 则 {
+        tok.类型 = 3  // 关键字
+    }
+
+    返回 tok
+}
+
+/**
+ * 读取数字
+ */
+函数 lexer读取数字(lex: Lexer): Token {
+    定义 tok: Token
+    定义 开始: 整数
+    开始 = lex.开始位置
+
+    tok.类型 = 1
+    tok.值 = ""
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+    tok.开始位置 = 开始
+
+    当 是数字(lex.当前字符) == 1 则 {
+        lex = lexer前进(lex)
+    }
+
+    tok.结束位置 = lex.位置
+
+    // 使用文本切片提取实际 token 值
+    定义 提取的值: 文本
+    提取的值 = 提取子串(lex.源码, 开始, lex.位置)
+    tok.值 = 提取的值
+
+    返回 tok
+}
+
+/**
+ * 读取字符串
+ */
+函数 lexer读取字符串(lex: Lexer): Token {
+    定义 tok: Token
+    定义 开始: 整数
+    开始 = lex.开始位置
+
+    tok.类型 = 2
+    tok.值 = ""
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+    tok.开始位置 = 开始
+
+    // 跳过开始的双引号
+    lex = lexer前进(lex)
+
+    当 lex.当前字符 != 34 且 lex.当前字符 != 0 则 {
+        lex = lexer前进(lex)
+    }
+
+    若 lex.当前字符 == 34 则 {
+        lex = lexer前进(lex)
+    }
+
+    tok.结束位置 = lex.位置
+
+    // 使用文本切片提取实际 token 值（包括引号）
+    定义 提取的值: 文本
+    提取的值 = 提取子串(lex.源码, 开始, lex.位置)
+    tok.值 = 提取的值
+
+    返回 tok
+}
+
+/**
+ * 读取运算符
+ */
+函数 lexer读取运算符(lex: Lexer): Token {
+    定义 tok: Token
+    定义 开始: 整数
+    开始 = lex.开始位置
+
+    tok.类型 = 4
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+    tok.开始位置 = 开始
+
+    当 是运算符(lex.当前字符) == 1 则 {
+        lex = lexer前进(lex)
+    }
+
+    tok.结束位置 = lex.位置
+
+    // 使用文本切片提取实际 token 值
+    定义 提取的值: 文本
+    提取的值 = 提取子串(lex.源码, 开始, lex.位置)
+    tok.值 = 提取的值
+
+    返回 tok
+}
+
+/**
+ * 读取符号
+ */
+函数 lexer读取符号(lex: Lexer): Token {
+    定义 tok: Token
+    定义 开始: 整数
+    开始 = lex.开始位置
+
+    tok.类型 = 5
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+    tok.开始位置 = 开始
+    tok.结束位置 = lex.位置 + 1
+
+    定义 提取的值: 文本
+    提取的值 = 提取子串(lex.源码, 开始, lex.位置 + 1)
+    tok.值 = 提取的值
+
+    lex = lexer前进(lex)
+
+    返回 tok
+}
+
+/**
+ * 读取下一个 Token
+ */
+函数 lexerNextToken(lex: Lexer): Token {
+    定义 tok: Token
+    tok.类型 = 6
+    tok.值 = ""
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+    tok.开始位置 = lex.位置
+    tok.结束位置 = lex.位置
+
+    lex = lexer跳过空白(lex)
+
+    定义 ch: 整数
+    ch = lex.当前字符
+
+    tok.开始位置 = lex.开始位置
+    tok.行号 = lex.行号
+    tok.列号 = lex.列号
+
+    // 文件结束
+    若 ch == 0 则 {
+        tok.类型 = 6
+        tok.值 = "EOF"
+        返回 tok
+    }
+
+    // 字符串
+    若 ch == 34 则 {
+        tok = lexer读取字符串(lex)
+        返回 tok
+    }
+
+    // 字符字面量
+    若 ch == 39 则 {
+        tok = lexer读取字符(lex)
+        返回 tok
+    }
+
+    // 注释
+    若 ch == 47 则 {
+        定义 nextCh: 整数
+        nextCh = lex.源码[lex.位置 + 1]
+        若 nextCh == 47 或 nextCh == 42 则 {
+            tok = lexer读取注释(lex)
+            返回 tok
+        }
+    }
+
+    // 复合运算符 (==, !=, <=, >=, &&, ||)
+    若 是比较起始(ch) == 1 则 {
+        tok = lexer读取复合运算符(lex)
+        返回 tok
+    }
+
+    // 字母开头 -> 标识符或关键字
+    若 是字母(ch) == 1 则 {
+        tok = lexer读取标识符(lex)
+        返回 tok
+    }
+
+    // 数字开头 -> 数字
+    若 是数字(ch) == 1 则 {
+        tok = lexer读取数字(lex)
+        返回 tok
+    }
+
+    // 单字符运算符 (+, -, *, /, %, etc.)
+    若 是运算符(ch) == 1 则 {
+        tok = lexer读取运算符(lex)
+        返回 tok
+    }
+
+    // 符号
+    若 是符号(ch) == 1 则 {
+        tok = lexer读取符号(lex)
+        返回 tok
+    }
+
+    // 未知字符
+    lex = lexer前进(lex)
+    tok.类型 = 12  // 错误
+    tok.值 = "UNKNOWN"
+    tok.结束位置 = lex.位置
+    返回 tok
+}
+
+/* ============ 主函数 ============ */
+
+/**
+ * 执行词法分析
+ */
+函数 lexerRun(源码: 文本): 整数 {
     打印("=== 词法分析 ===")
 
     定义 lex: Lexer
-    lex = lexerInit(src)
+    lex = lexerInit(源码)
 
     定义 count: 整数
     count = 0
 
     定义 tok: Token
-    tok.typ = Err
+    tok.类型 = 0
+    tok.值 = ""
+    tok.行号 = 0
+    tok.列号 = 0
+    tok.开始位置 = 0
+    tok.结束位置 = 0
 
-    定义 loopLex: Lexer
-    loopLex = lex
+    当 tok.类型 != 6 且 count < 1000 则 {
+        tok = lexerNextToken(lex)
 
-    当 tok.typ != End 则 {
-        loopLex = lexerScanToken(loopLex)
-        count = count + 1
-        若 count > 1000 则 {
-            tok.typ = End
+        // 跳过注释
+        若 tok.类型 == 7 则 {
+            跳过
+        }
+
+        若 tok.类型 != 6 则 {
+            count = count + 1
+            打印("Token ")
+            打印(count)
+            打印(": ")
+            打印(tok.值)
+            打印(" (类型=")
+            打印(tok.类型)
+            打印(", 行=")
+            打印(tok.行号)
+            打印(")")
         }
     }
 
+    打印("")
     打印("词法分析完成，共识别 ")
     打印(count)
     打印(" 个 Token")

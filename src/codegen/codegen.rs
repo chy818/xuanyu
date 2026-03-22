@@ -309,9 +309,16 @@ impl CodeGenerator {
                 // 列表类型：返回 i8* 指针
                 "i8*".to_string()
             }
-            Expr::IndexAccess(_) => {
-                // 索引访问：返回元素类型（简化为 i64）
-                "i64".to_string()
+            Expr::IndexAccess(index) => {
+                // 推断对象类型
+                let obj_type = self.infer_expression_type(&index.object);
+                if obj_type == "i8*" {
+                    // 字符串索引：返回 i64（字节值）
+                    "i64".to_string()
+                } else {
+                    // 列表索引：返回 i64
+                    "i64".to_string()
+                }
             }
             Expr::ListComprehension(_) => {
                 // 列表推导式：返回列表类型 i8*
@@ -1320,22 +1327,39 @@ impl CodeGenerator {
             Expr::IndexAccess(index) => {
                 // 生成对象表达式
                 let obj_val = self.generate_expression(&index.object)?;
-                
+
+                // 推断对象类型
+                let obj_type = self.infer_expression_type(&index.object);
+
                 // 生成索引表达式
                 let idx_val = self.generate_expression(&index.index)?;
-                
-                // 将对象值转换为指针
-                let obj_ptr = self.new_label("obj_ptr");
-                self.emit(&format!("%{} = inttoptr i64 %{} to i8*", obj_ptr, obj_val));
-                
-                // 调用列表获取函数
-                let result = self.new_label("elem");
-                self.emit(&format!("%{} = call i8* @rt_list_get(i8* %{}, i64 %{})", result, obj_ptr, idx_val));
-                
-                // 将结果转换为 i64
-                let result_val = self.new_label("elem_val");
-                self.emit(&format!("%{} = ptrtoint i8* %{} to i64", result_val, result));
-                Ok(result_val)
+
+                // 根据对象类型生成不同的索引代码
+                if obj_type == "i8*" {
+                    // 字符串索引：使用 getelementptr 获取字节
+                    let ptr = self.new_label("str_ptr");
+                    self.emit(&format!("%{} = getelementptr i8, i8* %{}, i64 %{}", ptr, obj_val, idx_val));
+                    let byte_val = self.new_label("byte");
+                    self.emit(&format!("%{} = load i8, i8* %{}", byte_val, ptr));
+                    // 零扩展为 i64
+                    let result = self.new_label("char_val");
+                    self.emit(&format!("%{} = zext i8 %{} to i64", result, byte_val));
+                    Ok(result)
+                } else {
+                    // 列表索引：调用 rt_list_get
+                    // 将对象值转换为指针
+                    let obj_ptr = self.new_label("obj_ptr");
+                    self.emit(&format!("%{} = inttoptr i64 %{} to i8*", obj_ptr, obj_val));
+
+                    // 调用列表获取函数
+                    let result = self.new_label("elem");
+                    self.emit(&format!("%{} = call i8* @rt_list_get(i8* %{}, i64 %{})", result, obj_ptr, idx_val));
+
+                    // 将结果转换为 i64
+                    let result_val = self.new_label("elem_val");
+                    self.emit(&format!("%{} = ptrtoint i8* %{} to i64", result_val, result));
+                    Ok(result_val)
+                }
             }
         }
     }
