@@ -166,6 +166,8 @@ impl CodeGenerator {
             "列表获取" => Some("rt_list_get"),
             "列表长度" => Some("rt_list_len"),
             "文本长度" => Some("rt_string_len"),
+            "文本获取字符" => Some("rt_string_char_at"),
+            "字符编码" => Some("rt_char_to_code"),
             // 兼容旧名称 - 映射到新的运行时函数
             "创建列表" => Some("rt_list_new"),
             "列表添加" => Some("rt_list_append"),
@@ -1539,7 +1541,8 @@ impl CodeGenerator {
         let is_list_add = func_name == "列表添加" || func_name == "list_add";
         let is_list_get = func_name == "列表获取" || func_name == "list_get";
         let is_list_len = func_name == "列表长度" || func_name == "list_len";
-        let is_list_func = is_list_create || is_list_add || is_list_get || is_list_len;
+        let is_list_constructor = func_name == "列表";
+        let is_list_func = is_list_create || is_list_add || is_list_get || is_list_len || is_list_constructor;
         
         // 检查是否是控制台输入函数
         let is_input_int = func_name == "输入整数";
@@ -1568,6 +1571,7 @@ impl CodeGenerator {
             "文本转整数" => "str_to_int".to_string(),
             "整数转文本" => "int_to_str".to_string(),
             "创建列表" => "create_list".to_string(),
+            "列表" => "rt_list_new".to_string(),  // 列表构造函数
             "列表添加" => "list_add".to_string(),
             "列表获取" => "list_get".to_string(),
             "列表长度" => "list_len".to_string(),

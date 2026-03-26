@@ -25,6 +25,7 @@ pub enum Keyword {
     否则,         // else
     否则若,       // else if / elif
     或,           // || (逻辑或关键字)
+    且,           // && (逻辑与关键字)
     当,           // while
     直到,         // until (do-while 后置条件)
     循环,         // loop / for 通用入口
@@ -35,6 +36,7 @@ pub enum Keyword {
     在,           // in (列表推导式: for x in list)
     跳过,         // continue (比"继续"更准确)
     退出,         // break (比"中断"更准确)
+    跳出,         // break (XY源码使用的关键字)
     匹配,         // match (模式匹配)
     情况,         // case
     默认,         // default
@@ -279,6 +281,7 @@ static KEYWORD_MAP: LazyLock<std::collections::HashMap<&'static str, Keyword>> =
     map.insert("取自", Keyword::取自);
     map.insert("跳过", Keyword::跳过);
     map.insert("退出", Keyword::退出);
+    map.insert("跳出", Keyword::跳出);
     map.insert("遍历", Keyword::遍历);
     map.insert("在", Keyword::在);
     map.insert("匹配", Keyword::匹配);
@@ -307,6 +310,7 @@ static KEYWORD_MAP: LazyLock<std::collections::HashMap<&'static str, Keyword>> =
     map.insert("或许", Keyword::或许);
     map.insert("如果", Keyword::如果);
     map.insert("或", Keyword::或);
+    map.insert("且", Keyword::且);
 
     // ========== 内存安全与所有权 ==========
     map.insert("定义", Keyword::定义);

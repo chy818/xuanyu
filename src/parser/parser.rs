@@ -301,9 +301,13 @@ impl Parser {
         // 解析字段列表
         let mut fields = Vec::new();
         while !self.check(&TokenType::右花括号) {
-            // 解析字段名
+            // 解析字段名（支持关键字作为字段名）
             let field_name = match self.current() {
                 Some(Token { token_type: TokenType::标识符, literal, .. }) => {
+                    literal.clone()
+                }
+                Some(Token { token_type: TokenType::Keyword(_), literal, .. }) => {
+                    // 关键字作为字段名
                     literal.clone()
                 }
                 _ => {
@@ -386,9 +390,18 @@ impl Parser {
         // 解析变体列表
         let mut variants = Vec::new();
         while !self.check(&TokenType::右花括号) {
+            // 支持关键字作为枚举变体名（如：字符, 整数, 文本等）
             let variant_name = match self.current() {
                 Some(Token { token_type: TokenType::标识符, literal, .. }) => {
                     literal.clone()
+                }
+                Some(Token { token_type: TokenType::Keyword(kw), literal, .. }) => {
+                    // 关键字作为变体名，使用其字面值或Debug格式
+                    if literal.is_empty() {
+                        format!("{:?}", kw)
+                    } else {
+                        literal.clone()
+                    }
                 }
                 _ => {
                     return Err(ParserError::unexpected_token(
@@ -478,7 +491,7 @@ impl Parser {
     fn parse_constant(&mut self) -> Result<ConstantDef, ParserError> {
         // 消耗 '常量' 关键字
         self.expect(&TokenType::Keyword(Keyword::常量))?;
-        
+
         let start_span = self.previous().unwrap().span.clone();
         
         // 常量名
@@ -707,9 +720,12 @@ impl Parser {
      * 参数 -> 标识符 ':' 类型
      */
     fn parse_parameter(&mut self) -> Result<FunctionParam, ParserError> {
-        // 参数名
+        // 参数名（支持关键字作为参数名）
         let name = match self.current() {
             Some(Token { token_type: TokenType::标识符, literal, .. }) => {
+                literal.clone()
+            }
+            Some(Token { token_type: TokenType::Keyword(_), literal, .. }) => {
                 literal.clone()
             }
             _ => {
@@ -873,10 +889,10 @@ impl Parser {
             
             // 循环语句: 循环 { ... }
             TokenType::Keyword(Keyword::循环) => self.parse_loop_statement(),
-            
-            // 跳出循环: 退出
-            TokenType::Keyword(Keyword::退出) => self.parse_break_statement(),
-            
+
+            // 跳出循环: 退出 或 跳出
+            TokenType::Keyword(Keyword::退出) | TokenType::Keyword(Keyword::跳出) => self.parse_break_statement(),
+
             // 跳过循环: 跳过
             TokenType::Keyword(Keyword::跳过) => self.parse_continue_statement(),
             
@@ -1405,11 +1421,12 @@ impl Parser {
 
     /**
      * 解析逻辑与 (&&)
+     * 支持: 与, 且
      */
     fn parse_and_expression(&mut self) -> Result<Expr, ParserError> {
         let mut left = self.parse_equality_expression()?;
 
-        while self.match_token(&TokenType::与) {
+        while self.match_token(&TokenType::与) || self.match_keyword(&Keyword::且) {
             let right = self.parse_equality_expression()?;
             let span = left.span().merge(right.span());
             left = Expr::Binary(BinaryExpr::new(
@@ -1661,6 +1678,9 @@ impl Parser {
                     Some(Token { token_type: TokenType::标识符, literal, .. }) => {
                         literal.clone()
                     }
+                    Some(Token { token_type: TokenType::Keyword(_), literal, .. }) => {
+                        literal.clone()
+                    }
                     _ => {
                         return Err(ParserError::unexpected_token(
                             "成员名",
@@ -1855,6 +1875,42 @@ impl Parser {
                     elements,
                     start_span.merge(end_span)
                 )))
+            }
+
+            // 类型关键字作为构造函数: 列表(), 整数(), 文本() 等
+            TokenType::Keyword(keyword) => {
+                let name = format!("{:?}", keyword);
+                let span = token.span;
+                self.position += 1;
+                
+                // 检查是否是函数调用
+                if self.check(&TokenType::左圆括号) {
+                    self.position += 1; // 消耗 '('
+                    
+                    let mut arguments = Vec::new();
+                    if !self.check(&TokenType::右圆括号) {
+                        arguments.push(self.parse_expression()?);
+                        
+                        while self.match_token(&TokenType::逗号) {
+                            arguments.push(self.parse_expression()?);
+                        }
+                    }
+                    
+                    self.expect(&TokenType::右圆括号)?;
+                    
+                    let end_span = self.previous()
+                        .map(|t| t.span)
+                        .unwrap_or(span);
+                    
+                    Ok(Expr::Call(CallExpr::new(
+                        Box::new(Expr::Identifier(IdentifierExpr::new(name, span))),
+                        arguments,
+                        span.merge(end_span)
+                    )))
+                } else {
+                    // 否则作为标识符处理
+                    Ok(Expr::Identifier(IdentifierExpr::new(name, span)))
+                }
             }
 
             // 未知 token

@@ -50,11 +50,9 @@ impl Scope {
 
     pub fn lookup(&self, name: &str) -> Option<&Symbol> {
         self.symbols.get(name).or_else(|| {
-            if let Some(parent_idx) = self.parent {
-                None // 简化处理，实际需要递归查找
-            } else {
-                None
-            }
+            // 父作用域查找需要通过 SemanticAnalyzer 来处理
+            // 这里只返回当前作用域的结果
+            None
         })
     }
 
@@ -68,14 +66,17 @@ impl Scope {
     /**
      * 查找类型定义
      */
-    pub fn lookup_type(&self, name: &str) -> Option<&Type> {
-        self.types.get(name).or_else(|| {
-            if let Some(parent_idx) = self.parent {
-                None // 简化处理
-            } else {
-                None
+    pub fn lookup_type<'a>(&'a self, name: &str, scopes: &'a [Scope]) -> Option<&'a Type> {
+        if let Some(t) = self.types.get(name) {
+            return Some(t);
+        }
+        // 递归查找父作用域
+        if let Some(parent_idx) = self.parent {
+            if let Some(parent) = scopes.get(parent_idx) {
+                return parent.lookup_type(name, scopes);
             }
-        })
+        }
+        None
     }
 }
 
@@ -120,7 +121,7 @@ impl SemanticAnalyzer {
     fn lookup_type(&self, name: &str) -> Option<&Type> {
         // 从当前作用域向上查找
         for scope in self.scopes.iter().rev() {
-            if let Some(t) = scope.lookup_type(name) {
+            if let Some(t) = scope.lookup_type(name, &self.scopes) {
                 return Some(t);
             }
         }
@@ -189,6 +190,11 @@ impl SemanticAnalyzer {
         // 收集所有类型别名到全局作用域
         for type_alias in &module.type_aliases {
             self.register_type_alias(type_alias)?;
+        }
+
+        // 处理顶级常量定义
+        for const_stmt in &module.constants {
+            self.analyze_constant_statement(const_stmt)?;
         }
 
         // 收集所有函数声明到全局作用域
@@ -485,6 +491,8 @@ impl SemanticAnalyzer {
         self.define_symbol("文本拼接".to_string(), Type::String, false, Span::dummy());
         self.define_symbol("文本切片".to_string(), Type::String, false, Span::dummy());
         self.define_symbol("文本包含".to_string(), Type::String, false, Span::dummy());
+        self.define_symbol("文本获取字符".to_string(), Type::String, false, Span::dummy());
+        self.define_symbol("字符编码".to_string(), Type::Int, false, Span::dummy());
         
         // 命令行参数函数
         self.define_symbol("参数个数".to_string(), Type::Int, false, Span::dummy());
@@ -858,8 +866,20 @@ impl SemanticAnalyzer {
     fn analyze_call_expression(&mut self, call: &CallExpr) -> Result<Type, Vec<TypeError>> {
         // 分析函数名表达式
         if let Expr::Identifier(ident) = &*call.function {
-            // 检查是否为内置函数
+            // 检查是否为内置类型构造函数
             match ident.name.as_str() {
+                "列表" => {
+                    // 列表构造函数，返回空列表类型
+                    return Ok(Type::List(Box::new(Type::Int)));
+                }
+                "整数" => {
+                    // 整数构造函数，返回整数类型
+                    return Ok(Type::Int);
+                }
+                "文本" => {
+                    // 文本构造函数，返回文本类型
+                    return Ok(Type::String);
+                }
                 "打印" | "print" => {
                     // 打印函数，返回 Void
                     return Ok(Type::Void);
@@ -938,7 +958,7 @@ impl SemanticAnalyzer {
         if let Type::Struct(struct_name) = &object_type {
             // 查找结构体定义
             if let Some(scope) = self.scopes.last() {
-                if let Some(struct_type) = scope.lookup_type(struct_name) {
+                if let Some(struct_type) = scope.lookup_type(struct_name, &self.scopes) {
                     // 结构体类型已注册，简化处理返回整数
                     return Ok(Type::Int);
                 }
