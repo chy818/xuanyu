@@ -185,6 +185,7 @@ pub enum BinaryOp {
     BitXor,    // 位异或 (^)
     Shl,       // 左移 (<<)
     Shr,       // 右移 (>>)
+    Hash,      // 哈希运算 (#)
 }
 
 /**
@@ -754,6 +755,8 @@ pub enum Type {
     Custom(String),
     /// 结构体类型 (命名)
     Struct(String),
+    /// 未知类型（用于前向引用）
+    Unknown,
 }
 
 /**

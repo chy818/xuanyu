@@ -1,0 +1,61 @@
+// 测试 parseIfStatement 函数的完整语法
+枚举 NodeType {
+    程序 = 0,
+    if语句 = 5
+}
+
+结构体 AST节点 {
+    id: 整数,
+    kind: 整数,
+    name: 文本,
+    children: 整数
+}
+
+结构体 Token {
+    类型: 整数,
+    值: 文本,
+    行号: 整数
+}
+
+结构体 Parser {
+    pos: 整数,
+    tokens: 整数
+}
+
+函数 parserPeekToken(p: Parser): Token {
+    定义 tok: Token
+    返回 tok
+}
+
+函数 parserConsume(p: Parser): Token {
+    定义 tok: Token
+    返回 tok
+}
+
+函数 parserCreateNode(kind: 整数, name: 文本, value: 文本, line: 整数): AST节点 {
+    定义 node: AST节点
+    返回 node
+}
+
+/* 解析 if 语句 */
+函数 parseIfStatement(p: Parser): AST节点 {
+    定义 tok: Token
+    定义 line: 整数
+    line = 0
+
+    定义 node: AST节点
+    node = parserCreateNode(5, "", "", line)  // if语句
+    node.children = 0
+
+    /* 消费 '若' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "若" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+函数 main(): 整数 {
+    返回 0
+}

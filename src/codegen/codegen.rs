@@ -42,6 +42,7 @@ fn type_to_llvm(ty: &Type) -> &'static str {
         Type::Optional(_) => "i64",
         Type::Array(_) => "i64",
         Type::Struct(_) => "i64",  // 结构体实例存储为 i64（指针值）
+        Type::Unknown => "i64",     // 未知类型暂时用 i64 代替
         Type::Custom(name) => {
             match name.as_str() {
                 _ => "i64",
@@ -1454,6 +1455,7 @@ impl CodeGenerator {
             BinaryOp::BitXor => "xor",
             BinaryOp::Shl => "shl",
             BinaryOp::Shr => "lshr",
+            BinaryOp::Hash => "xor", // 哈希运算使用xor作为替代
             BinaryOp::Assign => "add", // 特殊处理
         };
 

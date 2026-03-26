@@ -412,7 +412,16 @@ impl Parser {
                 }
             };
             self.advance();
-            
+
+            // 跳过枚举值赋值: = 数值 (如: 标识符 = 0)
+            if self.check(&TokenType::赋值) {
+                self.advance(); // 消耗 '='
+                // 跳过赋值的数值
+                while !self.check(&TokenType::逗号) && !self.check(&TokenType::右花括号) {
+                    self.advance();
+                }
+            }
+
             // 检查是否有字段列表: (类型1, 类型2) 或 (字段1: 类型1, 字段2: 类型2)
             let mut fields = Vec::new();
             if self.check(&TokenType::左圆括号) {
@@ -648,9 +657,12 @@ impl Parser {
         // 消耗 '函数' 关键字
         self.expect(&TokenType::Keyword(Keyword::函数))?;
 
-        // 函数名
+        // 函数名（支持关键字作为函数名，如：列表、文本等）
         let name = match self.current() {
             Some(Token { token_type: TokenType::标识符, literal, .. }) => {
+                literal.clone()
+            }
+            Some(Token { token_type: TokenType::Keyword(_), literal, .. }) => {
                 literal.clone()
             }
             _ => {
@@ -827,6 +839,13 @@ impl Parser {
                 let inner_type = Box::new(self.parse_type()?);
                 self.expect(&TokenType::大于)?;
                 return Ok(Type::Optional(inner_type));
+            }
+            // 支持关键字作为自定义类型名（如 Parser、AST节点 等）
+            // XY编译器自展时会遇到这种情况
+            Some(Token { token_type: TokenType::Keyword(_), literal, .. }) => {
+                let name = literal.clone();
+                self.position += 1;
+                Type::Custom(name)
             }
             Some(Token { token_type: TokenType::标识符, literal, .. }) => {
                 let name = literal.clone();
@@ -1517,13 +1536,13 @@ impl Parser {
     }
 
     /**
-     * 解析加法运算 (+, -)
+     * 解析加法运算 (+, -, <<, >>)
      */
     fn parse_additive_expression(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.parse_bitwise_expression()?;
+        let mut left = self.parse_shift_expression()?;
 
         while self.match_token(&TokenType::加) {
-            let right = self.parse_bitwise_expression()?;
+            let right = self.parse_shift_expression()?;
             let span = left.span().merge(right.span());
             left = Expr::Binary(BinaryExpr::new(
                 BinaryOp::Add,
@@ -1532,7 +1551,7 @@ impl Parser {
                 span
             ));
         } while self.match_token(&TokenType::减) {
-            let right = self.parse_bitwise_expression()?;
+            let right = self.parse_shift_expression()?;
             let span = left.span().merge(right.span());
             left = Expr::Binary(BinaryExpr::new(
                 BinaryOp::Sub,
@@ -1546,34 +1565,27 @@ impl Parser {
     }
 
     /**
-     * 解析乘法运算 (*, /, %)
+     * 解析移位运算 (<<, >>)
      */
-    fn parse_multiplicative_expression(&mut self) -> Result<Expr, ParserError> {
-        let mut left = self.parse_unary_expression()?;
+    fn parse_shift_expression(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.parse_bitwise_expression()?;
 
-        while self.match_token(&TokenType::乘) {
-            let right = self.parse_unary_expression()?;
+        while self.match_token(&TokenType::左移) {
+            let right = self.parse_bitwise_expression()?;
             let span = left.span().merge(right.span());
             left = Expr::Binary(BinaryExpr::new(
-                BinaryOp::Mul,
+                BinaryOp::Shl,
                 Box::new(left),
                 Box::new(right),
                 span
             ));
-        } while self.match_token(&TokenType::除) {
-            let right = self.parse_unary_expression()?;
+        }
+
+        while self.match_token(&TokenType::右移) {
+            let right = self.parse_bitwise_expression()?;
             let span = left.span().merge(right.span());
             left = Expr::Binary(BinaryExpr::new(
-                BinaryOp::Div,
-                Box::new(left),
-                Box::new(right),
-                span
-            ));
-        } while self.match_token(&TokenType::取余) {
-            let right = self.parse_unary_expression()?;
-            let span = left.span().merge(right.span());
-            left = Expr::Binary(BinaryExpr::new(
-                BinaryOp::Rem,
+                BinaryOp::Shr,
                 Box::new(left),
                 Box::new(right),
                 span
@@ -1616,6 +1628,55 @@ impl Parser {
             let span = left.span().merge(right.span());
             left = Expr::Binary(BinaryExpr::new(
                 BinaryOp::BitOr,
+                Box::new(left),
+                Box::new(right),
+                span
+            ));
+        }
+
+        while self.match_token(&TokenType::井号) {
+            let right = self.parse_multiplicative_expression()?;
+            let span = left.span().merge(right.span());
+            left = Expr::Binary(BinaryExpr::new(
+                BinaryOp::Hash,
+                Box::new(left),
+                Box::new(right),
+                span
+            ));
+        }
+
+        Ok(left)
+    }
+
+    /**
+     * 解析乘法运算 (*, /, %)
+     */
+    fn parse_multiplicative_expression(&mut self) -> Result<Expr, ParserError> {
+        let mut left = self.parse_unary_expression()?;
+
+        while self.match_token(&TokenType::乘) {
+            let right = self.parse_unary_expression()?;
+            let span = left.span().merge(right.span());
+            left = Expr::Binary(BinaryExpr::new(
+                BinaryOp::Mul,
+                Box::new(left),
+                Box::new(right),
+                span
+            ));
+        } while self.match_token(&TokenType::除) {
+            let right = self.parse_unary_expression()?;
+            let span = left.span().merge(right.span());
+            left = Expr::Binary(BinaryExpr::new(
+                BinaryOp::Div,
+                Box::new(left),
+                Box::new(right),
+                span
+            ));
+        } while self.match_token(&TokenType::取余) {
+            let right = self.parse_unary_expression()?;
+            let span = left.span().merge(right.span());
+            left = Expr::Binary(BinaryExpr::new(
+                BinaryOp::Rem,
                 Box::new(left),
                 Box::new(right),
                 span
@@ -1878,8 +1939,11 @@ impl Parser {
             }
 
             // 类型关键字作为构造函数: 列表(), 整数(), 文本() 等
+            // 也作为普通标识符使用（如函数参数名）
             TokenType::Keyword(keyword) => {
-                let name = format!("{:?}", keyword);
+                // 使用 token.literal 而不是 format!("{:?}", keyword)
+                // 因为 "类型别名" 的 literal 是 "类型"，而 Debug 格式是 "类型别名"
+                let name = token.literal.clone();
                 let span = token.span;
                 self.position += 1;
                 

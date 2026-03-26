@@ -1,0 +1,38 @@
+// 模拟 parser.xy 的结构
+枚举 NodeType {
+    程序 = 0,
+    函数定义 = 1,
+    变量定义 = 3
+}
+
+结构体 AST节点 {
+    id: 整数,
+    kind: 整数,
+    name: 文本
+}
+
+结构体 Token {
+    类型: 整数,
+    值: 文本
+}
+
+结构体 Parser {
+    tokens: 整数,
+    pos: 整数
+}
+
+函数 parserPeekToken(p: Parser): Token {
+    定义 tok: Token
+    返回 tok
+}
+
+函数 parseIfStatement(p: Parser): AST节点 {
+    定义 tok: Token
+    tok = parserPeekToken(p)
+    定义 node: AST节点
+    返回 node
+}
+
+函数 main(): 整数 {
+    返回 0
+}

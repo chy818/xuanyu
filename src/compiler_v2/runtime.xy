@@ -1629,14 +1629,12 @@
     digits = 列表()
 
     若 n == 0 则 {
-        digits.追加("0")
+        digits.追加(0)
     } 否则 {
         当 n > 0 则 {
             定义 digit: 整数
             digit = n % 10
-            定义 digitChar: 文本
-            digitChar = 文本获取字符("0123456789", digit)
-            digits.追加(digitChar)
+            digits.追加(digit)
             n = n / 10
         }
     }
@@ -1648,11 +1646,21 @@
     定义 j: 整数
     j = 列表长度(digits) - 1
     当 j >= 0 则 {
-        result = result + digits[数字到整(j)]
+        定义 n: 整数
+        n = digits[数字到整(j)]
+        result = result + 整数转文本(n)
         j = j - 1
     }
 
     返回 result
+}
+
+/**
+ * 数字到整数转换
+ * 用于列表索引访问时将数字转换为整数
+ */
+函数 数字到整(n: 整数): 整数 {
+    返回 n
 }
 
 /**

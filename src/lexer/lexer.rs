@@ -571,6 +571,10 @@ impl Lexer {
                 self.advance();
                 Token::new(TokenType::取余, "%".to_string(), self.make_span(start_line, start_column))
             }
+            '#' => {
+                self.advance();
+                Token::new(TokenType::井号, "#".to_string(), self.make_span(start_line, start_column))
+            }
 
             // 比较运算符
             '=' => {

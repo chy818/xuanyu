@@ -1,0 +1,14 @@
+// 测试 Parser 类型（这是 XY 编译器中的关键字）
+结构体 Parser {
+    pos: 整数,
+    tokens: 整数
+}
+
+函数 testFunc(p: Parser): Parser {
+    定义 tok: Parser
+    返回 tok
+}
+
+函数 main(): 整数 {
+    返回 0
+}

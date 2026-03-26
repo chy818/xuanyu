@@ -782,11 +782,12 @@
                             } 否则 {
                                 若 tok.值 == "退出" 则 {
                                     stmt = parseBreakStatement(p)
-                                    node.children = stmt  // 添加语句到块
+                                    node.children = stmt
+                                }
                             } 否则 {
                                 若 tok.值 == "跳过" 则 {
                                     stmt = parseContinueStatement(p)
-                                    node.children = stmt  // 添加语句到块
+                                    node.children = stmt
                                 } 否则 {
                                     stmt = parseAssignmentOrExpression(p)
                                     node.children = stmt  // 添加语句到块
