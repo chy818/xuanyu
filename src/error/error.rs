@@ -122,22 +122,76 @@ impl CodegenError {
 /**
  * 错误报告
  */
+
+/**
+ * 带源码上下文的错误报告
+ */
+pub fn report_error_with_context(error: &CompilerError, source_lines: &[String]) {
+    match error {
+        CompilerError::Lexer(e) => {
+            eprintln!("\n\x1b[31m错误\x1b[0m [{}]: {}", e.code, e.message);
+            print_source_context(source_lines, e.span.start_line, e.span.start_column, e.span.end_column);
+        }
+        CompilerError::Parser(e) => {
+            eprintln!("\n\x1b[31m错误\x1b[0m [{}]: {}", e.code, e.message);
+            print_source_context(source_lines, e.span.start_line, e.span.start_column, e.span.end_column);
+        }
+        CompilerError::Type(e) => {
+            eprintln!("\n\x1b[31m错误\x1b[0m [{}]: {}", e.code, e.message);
+            print_source_context(source_lines, e.span.start_line, e.span.start_column, e.span.end_column);
+        }
+        CompilerError::Codegen(e) => {
+            eprintln!("\n\x1b[31m错误\x1b[0m [{}]: {}", e.code, e.message);
+        }
+    }
+}
+
+/**
+ * 打印源码上下文
+ */
+fn print_source_context(source_lines: &[String], start_line: usize, start_col: usize, end_col: usize) {
+    let line_idx = start_line.saturating_sub(1);
+    if line_idx < source_lines.len() {
+        let line = &source_lines[line_idx];
+        eprintln!("\n  \x1b[34m{}\x1b[0m | {}", start_line, line);
+
+        // 打印空格和对齐的插入符号
+        let spaces = format!("  {} | ", start_line).len() + start_col;
+        let carets = if end_col > start_col {
+            (end_col - start_col).max(1)
+        } else {
+            1
+        };
+        eprintln!("{} \x1b[31m{}\x1b[0m", " ".repeat(spaces), "^".repeat(carets));
+    }
+}
+
+/**
+ * 简单的错误报告（向后兼容）
+ */
 pub fn report_error(error: &CompilerError) {
     match error {
         CompilerError::Lexer(e) => {
-            eprintln!("词法错误 [{}]: {} (行 {}, 列 {})", 
+            eprintln!("\n\x1b[31m错误\x1b[0m [{}]: {} (行 {}, 列 {})",
                 e.code, e.message, e.span.start_line, e.span.start_column);
         }
         CompilerError::Parser(e) => {
-            eprintln!("语法错误 [{}]: {} (行 {}, 列 {})", 
+            eprintln!("\n\x1b[31m错误\x1b[0m [{}]: {} (行 {}, 列 {})",
                 e.code, e.message, e.span.start_line, e.span.start_column);
         }
         CompilerError::Type(e) => {
-            eprintln!("类型错误 [{}]: {} (行 {}, 列 {})", 
+            eprintln!("\n\x1b[31m错误\x1b[0m [{}]: {} (行 {}, 列 {})",
                 e.code, e.message, e.span.start_line, e.span.start_column);
         }
         CompilerError::Codegen(e) => {
-            eprintln!("代码生成错误 [{}]: {}", e.code, e.message);
+            eprintln!("\n\x1b[31m错误\x1b[0m [{}]: {}", e.code, e.message);
         }
     }
+}
+
+/**
+ * 警告报告
+ */
+pub fn report_warning(message: &str, line: usize, col: usize) {
+    eprintln!("\n\x1b[33m警告\x1b[0m: {} (行 {}, 列 {})", message, line, col);
 }

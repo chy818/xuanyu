@@ -63,13 +63,20 @@ pub enum Expr {
      * 例如: 列表[0], 数组[索引]
      */
     IndexAccess(IndexAccessExpr),
-    
+
     /**
      * 列表推导式
      * 例如: [x * 2 for x in 列表]
      */
     ListComprehension(ListComprehensionExpr),
-    
+
+    /**
+     * Lambda 表达式（匿名函数）
+     * 例如: 函数(x, y) => x + y
+     * 或: 函数(参数: 整数) => 参数 * 2
+     */
+    Lambda(LambdaExpr),
+
     /**
      * 括号表达式
      */
@@ -88,6 +95,7 @@ impl ASTNode for Expr {
             Expr::ListLiteral(e) => e.span(),
             Expr::IndexAccess(e) => e.span(),
             Expr::ListComprehension(e) => e.span(),
+            Expr::Lambda(e) => e.span(),
             Expr::Grouped(e) => e.span(),
         }
     }
@@ -371,6 +379,46 @@ impl ListComprehensionExpr {
 }
 
 impl ASTNode for ListComprehensionExpr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/**
+ * Lambda 表达式（匿名函数）
+ * 例如: 函数(x, y) => x + y
+ */
+#[derive(Debug, Clone)]
+pub struct LambdaExpr {
+    pub params: Vec<FunctionParam>,          // 参数列表
+    pub body: Box<Expr>,                     // 函数体表达式
+    pub return_type: Option<Type>,            // 返回类型（可推断）
+    pub captured_vars: Vec<CapturedVar>,      // 捕获的外部变量
+    pub span: Span,
+}
+
+/**
+ * 捕获的变量信息
+ */
+#[derive(Debug, Clone)]
+pub struct CapturedVar {
+    pub name: String,        // 变量名
+    pub var_type: Type,      // 变量类型
+}
+
+impl LambdaExpr {
+    pub fn new(params: Vec<FunctionParam>, body: Box<Expr>, span: Span) -> Self {
+        Self {
+            params,
+            body,
+            return_type: None,
+            captured_vars: Vec::new(),
+            span,
+        }
+    }
+}
+
+impl ASTNode for LambdaExpr {
     fn span(&self) -> Span {
         self.span
     }
@@ -757,6 +805,10 @@ pub enum Type {
     Struct(String),
     /// 未知类型（用于前向引用）
     Unknown,
+    /// 类型变量（泛型参数）
+    /// 例如: 函数 foo<T>(x: T) => x
+    /// T 就是 TypeVar("T")
+    TypeVar(String),
 }
 
 /**

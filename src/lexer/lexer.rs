@@ -8,7 +8,7 @@
  * - 操作数之间必须保留至少一个空格或使用逗号分隔
  */
 
-use crate::lexer::token::{Token, TokenType, Span, Keyword, lookup_keyword, is_keyword, is_boolean_literal};
+use crate::lexer::token::{Token, TokenType, Span, lookup_keyword, is_keyword, is_boolean_literal};
 
 /**
  * 词法分析错误类型
@@ -107,20 +107,6 @@ impl LexerError {
 }
 
 /**
- * 词法分析器状态
- */
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LexerState {
-    Normal,
-    InIdentifier,
-    InNumber,
-    InString,
-    InChar,
-    InComment,
-    InLineComment,
-}
-
-/**
  * 词法分析器
  * 将源字符串转换为 Token 流
  */
@@ -133,10 +119,6 @@ pub struct Lexer {
     line: usize,
     /// 当前列号 (从 1 开始)
     column: usize,
-    /// 下一个 Token 的起始位置
-    next_position: usize,
-    /// 词法分析器状态
-    state: LexerState,
     /// 上一个生成的 Token (用于语义空格校验)
     prev_token: Option<Token>,
     /// 上一个 token 结束后的位置
@@ -155,8 +137,6 @@ impl Lexer {
             position: 0,
             line: 1,
             column: 1,
-            next_position: 0,
-            state: LexerState::Normal,
             prev_token: None,
             prev_token_end: 0,
             warnings: Vec::new(),
@@ -168,24 +148,6 @@ impl Lexer {
      */
     fn current_char(&self) -> Option<char> {
         self.source.get(self.position).copied()
-    }
-
-    /**
-     * 获取下一个字符 (不推进位置)
-     */
-    fn peek_char(&self) -> Option<char> {
-        self.source.get(self.position + 1).copied()
-    }
-
-    /**
-     * 获取前一个字符 (用于语义空格检测)
-     */
-    fn prev_char(&self) -> Option<char> {
-        if self.position > 0 {
-            self.source.get(self.position - 1).copied()
-        } else {
-            None
-        }
     }
 
     /**
@@ -280,7 +242,7 @@ impl Lexer {
         }
 
         // 使用 prev_token_end（上一个 token 结束后的字符位置）来检查
-        let mut check_pos = self.prev_token_end;
+        let check_pos = self.prev_token_end;
         let source_len = self.source.len();
         
         // 跳过前一个 token 结束后的所有空白字符
@@ -582,6 +544,9 @@ impl Lexer {
                 if self.current_char() == Some('=') {
                     self.advance();
                     Token::new(TokenType::等于, "==".to_string(), self.make_span(start_line, start_column))
+                } else if self.current_char() == Some('>') {
+                    self.advance();
+                    Token::new(TokenType::箭头, "=>".to_string(), self.make_span(start_line, start_column))
                 } else {
                     Token::new(TokenType::赋值, "=".to_string(), self.make_span(start_line, start_column))
                 }
@@ -781,18 +746,6 @@ fn is_cjk_character(ch: char) -> bool {
     (0x2A700..=0x2B73F).contains(&code) ||
     (0x2B740..=0x2B81F).contains(&code) ||
     (0x2B820..=0x2CEAF).contains(&code)
-}
-
-/**
- * 判断字符是否为 CJK 标点符号
- */
-fn is_cjk_punctuation(ch: char) -> bool {
-    let code = ch as u32;
-    // CJK 标点符号范围
-    (0x3000..=0x303F).contains(&code) ||
-    (0xFF00..=0xFFEF).contains(&code) ||
-    // 全角符号
-    (0x2000..=0x206F).contains(&code)
 }
 
 #[cfg(test)]

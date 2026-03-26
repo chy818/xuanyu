@@ -12,7 +12,7 @@
 
 use crate::ast::*;
 use crate::lexer::token::Span;
-use crate::error::{TypeError, CompilerError};
+use crate::error::TypeError;
 
 /**
  * 符号信息
@@ -493,7 +493,7 @@ impl SemanticAnalyzer {
         self.define_symbol("文本长度".to_string(), Type::Int, false, Span::dummy());
         self.define_symbol("文本拼接".to_string(), Type::String, false, Span::dummy());
         self.define_symbol("文本切片".to_string(), Type::String, false, Span::dummy());
-        self.define_symbol("文本包含".to_string(), Type::String, false, Span::dummy());
+        self.define_symbol("文本包含".to_string(), Type::Int, false, Span::dummy());
         self.define_symbol("文本获取字符".to_string(), Type::String, false, Span::dummy());
         self.define_symbol("字符编码".to_string(), Type::Int, false, Span::dummy());
         
@@ -678,7 +678,7 @@ impl SemanticAnalyzer {
             }
         }
 
-        let value_type = self.analyze_expression(&assign_stmt.value)?;
+        let _value_type = self.analyze_expression(&assign_stmt.value)?;
         
         // TODO: 检查赋值类型兼容性
         
@@ -738,7 +738,7 @@ impl SemanticAnalyzer {
             }
             Expr::IndexAccess(index) => {
                 // 分析被索引的对象
-                let obj_type = self.analyze_expression(&index.object)?;
+                let _obj_type = self.analyze_expression(&index.object)?;
                 // 分析索引表达式
                 self.analyze_expression(&index.index)?;
                 // 索引访问返回元素类型（简化处理，返回整数）
@@ -768,11 +768,141 @@ impl SemanticAnalyzer {
                 
                 // 退出作用域
                 self.exit_scope();
-                
+
                 // 返回列表类型
                 Ok(Type::List(Box::new(output_type)))
             }
+            Expr::Lambda(lambda) => {
+                // Lambda 表达式分析
+                // 1. 进入 Lambda 作用域
+                self.enter_scope();
+
+                // 2. 注册参数为局部变量
+                let mut param_names = Vec::new();
+                for param in &lambda.params {
+                    self.define_symbol(
+                        param.name.clone(),
+                        param.param_type.clone(),
+                        false,
+                        lambda.span
+                    );
+                    param_names.push(param.name.clone());
+                }
+
+                // 3. 分析函数体，收集自由变量（外部变量）
+                let mut captured_vars = Vec::new();
+                self.collect_free_variables(&lambda.body, &param_names, &mut captured_vars)?;
+
+                // 4. 退出作用域
+                self.exit_scope();
+
+                // 5. 更新 Lambda 的捕获变量列表
+                let mut lambda_mut = lambda.clone();
+                lambda_mut.captured_vars = captured_vars.clone();
+
+                // 6. 返回函数类型（简化处理，返回 Unknown）
+                Ok(Type::Unknown)
+            }
         }
+    }
+
+    /**
+     * 收集表达式中的自由变量
+     * free_vars: 已知的自由变量集合
+     * captured: 收集到的被捕获变量
+     */
+    fn collect_free_variables(
+        &self,
+        expr: &Expr,
+        param_names: &[String],
+        captured: &mut Vec<CapturedVar>,
+    ) -> Result<(), Vec<TypeError>> {
+        match expr {
+            Expr::Identifier(ident) => {
+                // 检查是否是参数
+                if !param_names.contains(&ident.name) {
+                    // 检查是否是局部变量（通过查找符号）
+                    if self.lookup_symbol(&ident.name).is_none() {
+                        // 这是一个自由变量，需要捕获
+                        // 检查是否已经捕获
+                        if !captured.iter().any(|v| v.name == ident.name) {
+                            // 获取变量类型
+                            let var_type = self.analyze_identifier_type(&ident.name)?;
+                            captured.push(CapturedVar {
+                                name: ident.name.clone(),
+                                var_type,
+                            });
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Expr::Lambda(inner_lambda) => {
+                // 嵌套 Lambda：参数不能被外层捕获
+                let mut inner_param_names = param_names.to_vec();
+                for param in &inner_lambda.params {
+                    inner_param_names.push(param.name.clone());
+                }
+                // 分析内部 Lambda 的体
+                self.collect_free_variables(&inner_lambda.body, &inner_param_names, captured)
+            }
+            Expr::Binary(binary) => {
+                self.collect_free_variables(&binary.left, param_names, captured)?;
+                self.collect_free_variables(&binary.right, param_names, captured)
+            }
+            Expr::Unary(unary) => {
+                self.collect_free_variables(&unary.operand, param_names, captured)
+            }
+            Expr::Call(call) => {
+                self.collect_free_variables(&call.function, param_names, captured)?;
+                for arg in &call.arguments {
+                    self.collect_free_variables(arg, param_names, captured)?;
+                }
+                Ok(())
+            }
+            Expr::MemberAccess(member) => {
+                self.collect_free_variables(&member.object, param_names, captured)
+            }
+            Expr::ListLiteral(list) => {
+                for elem in &list.elements {
+                    self.collect_free_variables(elem, param_names, captured)?;
+                }
+                Ok(())
+            }
+            Expr::IndexAccess(index) => {
+                self.collect_free_variables(&index.object, param_names, captured)?;
+                self.collect_free_variables(&index.index, param_names, captured)
+            }
+            Expr::ListComprehension(comp) => {
+                // 列表推导式有特殊作用域
+                self.collect_free_variables(&comp.output, param_names, captured)?;
+                self.collect_free_variables(&comp.iterable, param_names, captured)?;
+                if let Some(cond) = &comp.condition {
+                    self.collect_free_variables(cond, param_names, captured)?;
+                }
+                Ok(())
+            }
+            Expr::Grouped(inner) => {
+                self.collect_free_variables(inner, param_names, captured)
+            }
+            Expr::Literal(_) => Ok(()),
+        }
+    }
+
+    /**
+     * 分析标识符类型（不记录到符号表）
+     */
+    fn analyze_identifier_type(&self, name: &str) -> Result<Type, Vec<TypeError>> {
+        // 首先查找变量符号
+        if let Some(symbol) = self.lookup_symbol(name) {
+            return Ok(symbol.symbol_type.clone());
+        }
+        // 检查是否是类型名
+        if self.lookup_type(name).is_some() {
+            return Ok(Type::Custom(name.to_string()));
+        }
+        // 返回 Unknown
+        Ok(Type::Unknown)
     }
 
     /**
@@ -966,7 +1096,7 @@ impl SemanticAnalyzer {
         if let Type::Struct(struct_name) = &object_type {
             // 查找结构体定义
             if let Some(scope) = self.scopes.last() {
-                if let Some(struct_type) = scope.lookup_type(struct_name, &self.scopes) {
+                if let Some(_struct_type) = scope.lookup_type(struct_name, &self.scopes) {
                     // 结构体类型已注册，简化处理返回整数
                     return Ok(Type::Int);
                 }

@@ -12,7 +12,7 @@
 
 use crate::lexer::{Token, TokenType, Keyword, Span};
 use crate::ast::*;
-use crate::error::{ParserError, CompilerError};
+use crate::error::ParserError;
 
 /**
  * 语法分析器
@@ -1105,7 +1105,7 @@ impl Parser {
         self.position += 1;
 
         // 可变修饰符
-        let is_mutable = self.match_keyword(&Keyword::可变);
+        let _is_mutable = self.match_keyword(&Keyword::可变);
 
         // 变量名
         let name = match self.current() {
@@ -1785,6 +1785,26 @@ impl Parser {
                 Ok(Expr::Identifier(IdentifierExpr::new(name, span)))
             }
 
+            // Lambda 表达式: 函数(参数) => 表达式
+            // 例如: 函数(x, y) => x + y
+            TokenType::Keyword(Keyword::函数) => {
+                let span = token.span.clone();
+                self.expect(&TokenType::Keyword(Keyword::函数))?;
+
+                // 解析参数列表
+                self.expect(&TokenType::左圆括号)?;
+                let params = self.parse_parameter_list()?;
+                self.expect(&TokenType::右圆括号)?;
+
+                // 期望箭头符号 =>
+                self.expect(&TokenType::箭头)?;
+
+                // 解析函数体表达式
+                let body = self.parse_expression()?;
+
+                Ok(Expr::Lambda(LambdaExpr::new(params, Box::new(body), span)))
+            }
+
             // 整数字面量
             TokenType::整数字面量 => {
                 let value: i64 = token.literal.parse()
@@ -1940,7 +1960,7 @@ impl Parser {
 
             // 类型关键字作为构造函数: 列表(), 整数(), 文本() 等
             // 也作为普通标识符使用（如函数参数名）
-            TokenType::Keyword(keyword) => {
+            TokenType::Keyword(_keyword) => {
                 // 使用 token.literal 而不是 format!("{:?}", keyword)
                 // 因为 "类型别名" 的 literal 是 "类型"，而 Debug 格式是 "类型别名"
                 let name = token.literal.clone();

@@ -8,6 +8,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, exit};
+use std::time::SystemTime;
 
 #[cfg(target_os = "windows")]
 fn setup_windows_console() {
@@ -93,9 +94,18 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
     println!("正在编译: {}", filename);
     println!("源文件大小: {} 字节", source.len());
 
+    // ========== 增量编译检查 ==========
+    let cache_valid = check_cache(filename, &source)?;
+
+    // 如果缓存有效且不是强制重新编译，可以跳过大部分工作
+    if cache_valid && mode == RunMode::IrOnly {
+        println!("[缓存] 源文件未修改，跳过编译");
+        return Ok(());
+    }
+
     // ========== 词法分析 ==========
     println!("\n=== 词法分析 ===");
-    let mut lexer = xuanyu::Lexer::new(source);
+    let mut lexer = xuanyu::Lexer::new(source.clone());
     
     let tokens = lexer.tokenize()
         .map_err(|e| format!("词法错误 [{}]: {} (行 {}, 列 {})", 
@@ -250,6 +260,9 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
 
             println!("链接成功: {}", output_exe);
 
+            // 更新缓存
+            let _ = update_cache(filename, &source.clone());
+
             // 清理临时文件
             cleanup(&temp_ir, temp_obj);
 
@@ -297,6 +310,59 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
 fn cleanup(ir_file: &str, obj_file: &str) {
     let _ = fs::remove_file(ir_file);
     let _ = fs::remove_file(obj_file);
+}
+
+fn get_source_hash(source: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn get_file_mod_time(filename: &str) -> Option<SystemTime> {
+    fs::metadata(filename).ok().and_then(|m| m.modified().ok())
+}
+
+fn check_cache(filename: &str, source: &str) -> Result<bool, String> {
+    let cache_file = format!("{}.cache", filename);
+    let source_hash = get_source_hash(source);
+    let source_mod_time = get_file_mod_time(filename);
+
+    if let Ok(cache_content) = fs::read_to_string(&cache_file) {
+        let parts: Vec<&str> = cache_content.split(',').collect();
+        if parts.len() >= 2 {
+            if let (Ok(cache_hash), Ok(cache_time)) = (parts[0].parse::<u64>(), parts[1].parse::<u64>()) {
+                if cache_hash == source_hash {
+                    if let Some(mod_time) = source_mod_time {
+                        if let Ok(duration) = mod_time.duration_since(SystemTime::UNIX_EPOCH) {
+                            if duration.as_secs() == cache_time {
+                                return Ok(true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn update_cache(filename: &str, source: &str) -> Result<(), String> {
+    let cache_file = format!("{}.cache", filename);
+    let source_hash = get_source_hash(source);
+    let source_mod_time = get_file_mod_time(filename)
+        .ok_or_else(|| "无法获取文件修改时间".to_string())?;
+
+    let duration = source_mod_time.duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(|_| "无法计算时间戳")?;
+
+    let cache_content = format!("{},{}", source_hash, duration.as_secs());
+    fs::write(&cache_file, cache_content)
+        .map_err(|e| format!("无法写入缓存文件: {}", e))?;
+
+    println!("[缓存] 已更新缓存");
+    Ok(())
 }
 
 fn print_usage(program: &str) {
