@@ -26,16 +26,28 @@ Thumbs.db
 *.pdb
 *.ilk
 *.exp
+*.ll
+*.bc
 
 # Debug 和 Release
 debug/
 release/
 *.d
 
-# 临时文件
+# 临时文件和测试产物
 *.tmp
 *.log
+*.out
+*.asm
+*.s
+
+# 测试生成的临时文件
+test_*.xy
 
 # Trae IDE
 .trae/
 MCP.json
+
+# xy 编译器输出
+*.ir
+out/
