@@ -751,6 +751,7 @@ fn is_cjk_character(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lexer::token::Keyword;
 
     #[test]
     fn test_keywords() {
@@ -831,11 +832,58 @@ mod tests {
         let source = "循环 从 0 到 10".to_string();
         let mut lexer = Lexer::new(source);
         let tokens = lexer.tokenize().unwrap();
-        
+
         assert_eq!(tokens[0].token_type, TokenType::Keyword(Keyword::循环));
         assert_eq!(tokens[1].token_type, TokenType::Keyword(Keyword::从));
         assert_eq!(tokens[2].token_type, TokenType::整数字面量);
         assert_eq!(tokens[3].token_type, TokenType::Keyword(Keyword::到));
         assert_eq!(tokens[4].token_type, TokenType::整数字面量);
+    }
+
+    #[test]
+    fn test_english_keyword_aliases() {
+        // 测试英文关键字别名
+        let source = "if else while loop fn return let mut struct enum import".to_string();
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+
+        assert_eq!(tokens[0].token_type, TokenType::Keyword(Keyword::若));      // if
+        assert_eq!(tokens[1].token_type, TokenType::Keyword(Keyword::否则));     // else
+        assert_eq!(tokens[2].token_type, TokenType::Keyword(Keyword::当));      // while
+        assert_eq!(tokens[3].token_type, TokenType::Keyword(Keyword::循环));    // loop
+        assert_eq!(tokens[4].token_type, TokenType::Keyword(Keyword::函数));    // fn
+        assert_eq!(tokens[5].token_type, TokenType::Keyword(Keyword::返回));    // return
+        assert_eq!(tokens[6].token_type, TokenType::Keyword(Keyword::定义));     // let
+        assert_eq!(tokens[7].token_type, TokenType::Keyword(Keyword::可变));    // mut
+        assert_eq!(tokens[8].token_type, TokenType::Keyword(Keyword::结构体));  // struct
+        assert_eq!(tokens[9].token_type, TokenType::Keyword(Keyword::枚举));   // enum
+        assert_eq!(tokens[10].token_type, TokenType::Keyword(Keyword::引入));  // import
+    }
+
+    #[test]
+    fn test_mixed_chinese_english_keywords() {
+        // 测试中英文混合使用: 函数 main() 返回 整数 { if x > 0 { return x } 返回 0 }
+        let source = "函数 main() 返回 整数 { if x > 0 { 返回 x } 返回 0 }".to_string();
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+
+        assert_eq!(tokens[0].token_type, TokenType::Keyword(Keyword::函数));    // 中文
+        assert_eq!(tokens[1].token_type, TokenType::标识符);                    // main
+        assert_eq!(tokens[2].token_type, TokenType::左圆括号);
+        assert_eq!(tokens[3].token_type, TokenType::右圆括号);
+        assert_eq!(tokens[4].token_type, TokenType::Keyword(Keyword::返回));    // 中文
+        assert_eq!(tokens[5].token_type, TokenType::Keyword(Keyword::整数));    // 中文
+        assert_eq!(tokens[6].token_type, TokenType::左花括号);
+        assert_eq!(tokens[7].token_type, TokenType::Keyword(Keyword::若));      // 英文 if
+        assert_eq!(tokens[8].token_type, TokenType::标识符);                    // x
+        assert_eq!(tokens[9].token_type, TokenType::大于);
+        assert_eq!(tokens[10].token_type, TokenType::整数字面量);                // 0
+        assert_eq!(tokens[11].token_type, TokenType::左花括号);                  // {
+        assert_eq!(tokens[12].token_type, TokenType::Keyword(Keyword::返回));    // 返回
+        assert_eq!(tokens[13].token_type, TokenType::标识符);                    // x
+        assert_eq!(tokens[14].token_type, TokenType::右花括号);                   // }
+        assert_eq!(tokens[15].token_type, TokenType::Keyword(Keyword::返回));   // 返回
+        assert_eq!(tokens[16].token_type, TokenType::整数字面量);                // 0
+        assert_eq!(tokens[17].token_type, TokenType::右花括号);                   // }
     }
 }

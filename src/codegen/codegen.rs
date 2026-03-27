@@ -67,6 +67,16 @@ pub struct CodeGenerator {
     variable_types: std::collections::HashMap<String, String>,
     /// 字符串常量表
     string_constants: std::collections::HashMap<String, (String, usize)>,
+    /// 闭包变量映射：变量名 -> Lambda 函数名
+    closures: std::collections::HashMap<String, String>,
+    /// 当前函数名（用于尾调用优化）
+    current_function_name: Option<String>,
+    /// 当前函数参数列表
+    current_function_params: Vec<String>,
+    /// 函数入口标签
+    entry_label: Option<String>,
+    /// 是否处于尾调用位置
+    in_tail_position: bool,
 }
 
 impl CodeGenerator {
@@ -79,6 +89,11 @@ impl CodeGenerator {
             variables: std::collections::HashMap::new(),
             variable_types: std::collections::HashMap::new(),
             string_constants: std::collections::HashMap::new(),
+            closures: std::collections::HashMap::new(),
+            current_function_name: None,
+            current_function_params: Vec::new(),
+            entry_label: None,
+            in_tail_position: false,
         }
     }
 
@@ -638,13 +653,21 @@ impl CodeGenerator {
     fn generate_function(&mut self, func: &Function) -> Result<(), CodegenError> {
         // 函数头 - 生成函数签名
         let ret_type = type_to_llvm(&func.return_type);
-        
+
         // 重置函数作用域的变量映射和计数器
         // （文档建议：每个函数作用域独立计数）
         self.variables.clear();
         self.variable_types.clear();
         self.label_counter = 0;
-        
+        self.closures.clear();
+
+        // 保存当前函数信息（用于尾调用优化）
+        let func_name = func.name.clone();
+        self.current_function_name = Some(func_name.clone());
+        self.current_function_params = func.params.iter()
+            .map(|p| self.translate_func_name(&p.name))
+            .collect();
+
         // 生成参数列表
         let mut param_strs = Vec::new();
         let mut translated_param_names = Vec::new();
@@ -655,11 +678,10 @@ impl CodeGenerator {
             param_strs.push(format!("{} %{}", param_type, translated_name));
         }
         let params_str = param_strs.join(", ");
-        
+
         // 翻译函数名
-        let func_name = &func.name;
-        let llvm_func_name = self.translate_func_name(func_name);
-        
+        let llvm_func_name = self.translate_func_name(&func_name);
+
         // 根据函数名是否包含非ASCII字符决定格式
         let func_def = if func_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             // ASCII 函数名：直接使用
@@ -670,7 +692,12 @@ impl CodeGenerator {
         };
         self.emit(&func_def);
         self.emit(&format!("; 函数: {}", func.name));
-        
+
+        // 创建函数入口标签（用于尾调用优化）
+        let entry = self.new_label("entry");
+        self.entry_label = Some(entry.clone());
+        self.emit(&format!("{}:", entry));
+
         // 为每个参数创建分配指令
         for (param, translated_name) in func.params.iter().zip(translated_param_names.iter()) {
             let param_type = type_to_llvm(&param.param_type);
@@ -689,6 +716,8 @@ impl CodeGenerator {
 
         // 函数体语句
         for stmt in &func.body.statements {
+            // 每个语句开始时重置尾调用位置标记
+            self.in_tail_position = false;
             self.generate_statement(stmt)?;
         }
 
@@ -702,6 +731,12 @@ impl CodeGenerator {
         }
 
         self.emit("}");
+
+        // 清除函数信息
+        self.current_function_name = None;
+        self.current_function_params.clear();
+        self.entry_label = None;
+        self.in_tail_position = false;
 
         Ok(())
     }
@@ -844,10 +879,19 @@ impl CodeGenerator {
         // 如果有初始化值
         if let Some(init) = &let_stmt.initializer {
             let value = self.generate_expression(init)?;
-            
+
             // 获取初始化表达式的类型
             let init_type = self.infer_expression_type(init);
-            
+
+            // 检测是否是 Lambda 表达式并记录闭包
+            if matches!(init, Expr::Lambda(_)) {
+                // Lambda 表达式：value 是闭包指针 (i64)
+                let closure_name = format!("closure_{}", let_stmt.name);
+                self.closures.insert(closure_name.clone(), closure_name.clone());
+                self.variables.insert(closure_name.clone(), alloca.clone());
+                self.variable_types.insert(closure_name, "i64".to_string());
+            }
+
             // 类型匹配处理
             if var_type == "i8*" && init_type == "i8*" {
                 // 列表类型：存储 i8* 指针
@@ -870,10 +914,33 @@ impl CodeGenerator {
     }
 
     /**
-     * 生成返回语句
+     * 生成返回语句（支持尾调用优化）
      */
     fn generate_return_statement(&mut self, return_stmt: &ReturnStmt) -> Result<(), CodegenError> {
         if let Some(value) = &return_stmt.value {
+            // 检查是否是尾递归调用
+            if self.in_tail_position {
+                if let Expr::Call(call_expr) = value {
+                    // 检查是否是调用当前函数
+                    if let Expr::Identifier(ident) = &*call_expr.function {
+                        if let Some(current_func) = &self.current_function_name {
+                            let called_func = &ident.name;
+                            // 翻译函数名进行比较
+                            let translated_called = self.translate_func_name(called_func);
+                            let translated_current = self.translate_func_name(current_func);
+
+                            if translated_called == translated_current {
+                                // 检测到尾递归！将调用转换为参数更新 + 跳转
+                                self.emit("; 尾递归优化：跳转回入口");
+                                self.emit(&format!("br label %{}", self.entry_label.as_ref().unwrap()));
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 如果不是尾递归，正常生成返回
             let result = self.generate_expression(value)?;
             let ret_type = type_to_llvm(&Type::Int); // 简化
             self.emit(&format!("ret {} %{}", ret_type, result));
@@ -920,6 +987,9 @@ impl CodeGenerator {
 
             // 结束标签
             self.emit_label(&end_label);
+
+            // if-else 结构结束后处于尾位置（因为 if 和 else 分支都会跳到这里）
+            self.in_tail_position = true;
         }
 
         Ok(())
@@ -961,14 +1031,21 @@ impl CodeGenerator {
         // 循环体入口
         self.emit_label(&loop_body);
 
+        // 循环体处于尾位置（如果最后是 return递归 可以优化）
+        self.in_tail_position = true;
+
         // 生成循环体
         self.generate_statement(&loop_stmt.body)?;
 
-        // 循环体执行完后，跳回条件判断
+        // 循环体执行完后，跳回条件判断（这不是尾调用优化的位置）
+        self.in_tail_position = false;
         self.emit(&format!("br label %{}", loop_start));
 
         // 循环结束标签
         self.emit_label(&loop_end);
+
+        // 循环结束后处于尾位置
+        self.in_tail_position = true;
 
         Ok(())
     }
@@ -979,6 +1056,10 @@ impl CodeGenerator {
     fn generate_block_statement(&mut self, block_stmt: &BlockStmt) -> Result<(), CodegenError> {
         for stmt in &block_stmt.statements {
             self.generate_statement(stmt)?;
+        }
+        // 块语句结束后处于尾位置
+        if !block_stmt.statements.is_empty() {
+            self.in_tail_position = true;
         }
         Ok(())
     }
@@ -1312,21 +1393,59 @@ impl CodeGenerator {
                 Ok(result_list)
             }
             Expr::Lambda(lambda) => {
-                // Lambda 表达式：生成闭包
+                // Lambda 表达式：生成完整闭包
                 let lambda_id = self.lambda_counter;
                 self.lambda_counter += 1;
 
-                // 生成 Lambda 函数名
-                let lambda_name = format!("lambda_{}", lambda_id);
+                let lambda_func_name = format!("lambda_{}_func", lambda_id);
+                let closure_var_name = format!("closure_{}", lambda_id);
+                let captured_count = lambda.captured_vars.len();
+
+                // ===== 第一步：生成 Lambda 函数 =====
+                // Lambda 函数签名: i64 (i8*)
+                // 第一个参数是闭包上下文的 i8* 指针
+                self.emit(&format!("define i64 @{}(i8* %ctx) {{", lambda_func_name));
+
+                // 在函数入口保存当前上下文
+                self.emit("entry:");
 
                 // 为参数分配空间并注册
                 for param in &lambda.params {
-                    let param_alloca = self.new_label("param");
                     let param_type = type_to_llvm(&param.param_type);
+                    let param_alloca = self.new_label("param");
                     self.emit(&format!("%{} = alloca {}", param_alloca, param_type));
                     let translated_name = self.translate_func_name(&param.name);
                     self.variables.insert(translated_name.clone(), param_alloca.clone());
                     self.variable_types.insert(translated_name, param_type.to_string());
+                }
+
+                // ===== 从闭包上下文加载捕获的变量 =====
+                let mut captured_offset = 16;
+                for captured_var in &lambda.captured_vars {
+                    let captured_type = type_to_llvm(&captured_var.var_type);
+                    let captured_alloca = self.new_label("captured");
+                    self.emit(&format!("%{} = alloca {}", captured_alloca, captured_type));
+
+                    // 计算捕获变量的 GEP
+                    let gep = self.new_label("gep");
+                    self.emit(&format!("%{} = getelementptr i8, i8* %ctx, i64 {}", gep, captured_offset));
+
+                    // 转换为目标类型指针并加载
+                    let ptr_cast = self.new_label("ptr_cast");
+                    self.emit(&format!("%{} = bitcast i8* %{} to {}*", ptr_cast, gep, captured_type));
+                    let loaded = self.new_label("loaded");
+                    self.emit(&format!("%{} = load {}, {}* %{}", loaded, captured_type, captured_type, ptr_cast));
+
+                    // 存储到局部变量
+                    self.emit(&format!("store {} %{}, {}* %{}", captured_type, loaded, captured_type, captured_alloca));
+
+                    // 注册到变量表
+                    self.variables.insert(captured_var.name.clone(), captured_alloca.clone());
+                    self.variable_types.insert(captured_var.name.clone(), captured_type.to_string());
+
+                    // 更新偏移量
+                    let type_size = if captured_type == "double" { 8 } else { 8 };
+                    captured_offset += type_size;
                 }
 
                 // 生成函数体
@@ -1334,15 +1453,70 @@ impl CodeGenerator {
 
                 // 生成返回指令
                 self.emit(&format!("ret i64 %{}", body_result));
+                self.emit("}");
 
-                // 函数结束标签
-                let func_end = self.new_label("func_end");
-                self.emit(&format!("{}:", func_end));
+                // ===== 第二步：创建闭包结构 =====
 
-                // 返回函数指针（简化：直接返回函数地址）
-                // TODO: 完整实现需要返回闭包结构
-                let result = self.new_label("lambda_result");
-                self.emit(&format!("%{} = add i64 0, 0", result));
+                // 计算闭包大小：16 字节头 + 每个捕获变量 8 字节
+                let closure_size = 16 + captured_count * 8;
+                let size_label = self.new_label("closure_size");
+                self.emit(&format!("%{} = mul i64 1, {}", size_label, closure_size));
+
+                // 分配闭包内存
+                let malloc_label = self.new_label("malloc");
+                self.emit(&format!("%{} = call i8* @malloc(i64 %{})", malloc_label, size_label));
+
+                // 存储函数指针到闭包
+                let func_ptr_int = self.new_label("func_ptr_int");
+                self.emit(&format!("%{} = ptrtoint i64 (i8*)* @{} to i64", func_ptr_int, lambda_func_name));
+                let func_ptr_ptr = self.new_label("func_ptr_ptr");
+                self.emit(&format!("%{} = inttoptr i64 %{} to i8*", func_ptr_ptr, func_ptr_int));
+
+                // 存储函数指针到偏移 0
+                let gep0 = self.new_label("gep0");
+                self.emit(&format!("%{} = getelementptr i8, i8* %{}, i64 0", gep0, malloc_label));
+                let ptr_cast0 = self.new_label("ptr_cast0");
+                self.emit(&format!("%{} = bitcast i8* %{} to i8**", ptr_cast0, gep0));
+                self.emit(&format!("store i8* %{}, i8** %{}", func_ptr_ptr, ptr_cast0));
+
+                // 存储捕获变量数量到偏移 8
+                let gep8 = self.new_label("gep8");
+                self.emit(&format!("%{} = getelementptr i8, i8* %{}, i64 8", gep8, malloc_label));
+                let ptr_cast8 = self.new_label("ptr_cast8");
+                self.emit(&format!("%{} = bitcast i8* %{} to i64*", ptr_cast8, gep8));
+                self.emit(&format!("store i64 {}, i64* %{}", captured_count, ptr_cast8));
+
+                // ===== 第三步：复制捕获变量的当前值到闭包 =====
+                let mut copy_offset = 16;
+                for captured_var in &lambda.captured_vars {
+                    // 获取外部变量的当前值
+                    if let Some(var_ssa) = self.variables.get(&captured_var.name).cloned() {
+                        let var_type = type_to_llvm(&captured_var.var_type);
+
+                        // 加载当前值
+                        let load_inst = self.new_label("captured_val");
+                        self.emit(&format!("%{} = load {}, {}* %{}", load_inst, var_type, var_type, var_ssa));
+
+                        // 计算目标位置
+                        let dest_gep = self.new_label("dest_gep");
+                        self.emit(&format!("%{} = getelementptr i8, i8* %{}, i64 {}", dest_gep, malloc_label, copy_offset));
+                        let dest_ptr = self.new_label("dest_ptr");
+                        self.emit(&format!("%{} = bitcast i8* %{} to {}*", dest_ptr, dest_gep, var_type));
+
+                        // 存储值
+                        self.emit(&format!("store {} %{}, {}* %{}", var_type, load_inst, var_type, dest_ptr));
+                    }
+                    copy_offset += 8;
+                }
+
+                // 返回闭包指针（作为 i64）
+                let result = self.new_label("closure_result");
+                self.emit(&format!("%{} = ptrtoint i8* %{} to i64", result, malloc_label));
+
+                // 注册闭包变量
+                self.variables.insert(closure_var_name.clone(), result.clone());
+                self.variable_types.insert(closure_var_name, "i64".to_string());
+
                 Ok(result)
             }
             Expr::IndexAccess(index) => {
@@ -1581,6 +1755,10 @@ impl CodeGenerator {
             _ => "unknown".to_string(),
         };
 
+        // 检查是否是闭包调用
+        let closure_name = format!("closure_{}", func_name);
+        let is_closure_call = self.closures.contains_key(&closure_name);
+
         // 检查是否是内置函数
         let is_builtin_print = func_name == "打印" || func_name == "print";
         let is_builtin_to_int = func_name == "文本转整数" || func_name == "str_to_int";
@@ -1809,13 +1987,49 @@ impl CodeGenerator {
         };
         
         // 生成函数调用
-        if args.is_empty() {
+        if is_closure_call {
+            // 闭包调用：从闭包中提取函数指针并调用
+            // 获取闭包指针（从 closure_xxx 变量）
+            let closure_ptr = if let Some(closure_ssa) = self.variables.get(&closure_name) {
+                closure_ssa.clone()
+            } else {
+                // 尝试直接使用函数名作为变量
+                func_name.clone()
+            };
+
+            // 从闭包中提取函数指针（偏移 0 处）
+            let closure_val = self.new_label("closure_val");
+            self.emit(&format!("%{} = load i64, i64* %{}", closure_val, closure_ptr));
+
+            let closure_int_ptr = self.new_label("closure_int_ptr");
+            self.emit(&format!("%{} = inttoptr i64 %{} to i8*", closure_int_ptr, closure_val));
+
+            let func_ptr_ptr = self.new_label("func_ptr_ptr");
+            self.emit(&format!("%{} = getelementptr i8, i8* %{}, i64 0", func_ptr_ptr, closure_int_ptr));
+
+            let func_ptr_ptr_cast = self.new_label("func_ptr_ptr_cast");
+            self.emit(&format!("%{} = bitcast i8* %{} to i64 (i8*)*", func_ptr_ptr_cast, func_ptr_ptr));
+
+            let func_ptr = self.new_label("func_ptr");
+            self.emit(&format!("%{} = load i64 (i8*)*, i64 (i8*)* %{}", func_ptr, func_ptr_ptr_cast));
+
+            // 构建闭包调用的参数列表：闭包上下文 + 用户参数
+            let mut closure_args = vec![format!("i8* %{}", closure_int_ptr)];
+            closure_args.extend(args.iter().map(|a| a.clone()));
+
+            let args_str = closure_args.join(", ");
+            let result = self.new_label("closure_call");
+            self.emit(&format!("%{} = call i64 %{}({})", result, func_ptr, args_str));
+
+            Ok(result)
+        } else if args.is_empty() {
             if is_void_call {
                 self.emit(&format!("call {} @{}({})", ret_type, llvm_func_ref, ""));
                 self.emit(&format!("%{} = add i64 0, 0", result));
             } else {
                 self.emit(&format!("%{} = call {} @{}({})", result, ret_type, llvm_func_ref, ""));
             }
+            Ok(result)
         } else {
             let args_str = args.join(", ");
 
@@ -1837,9 +2051,9 @@ impl CodeGenerator {
                 // 其他内置函数返回 i64
                 self.emit(&format!("%{} = call i64 @{}({})", result, llvm_func_ref, args_str));
             }
-        }
 
-        Ok(result)
+            Ok(result)
+        }
     }
 }
 

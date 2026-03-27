@@ -17,3 +17,8 @@ pub use parser::{Parser, parse};
 pub use ast::{Module, Function, Stmt, Expr};
 pub use sema::{SemanticAnalyzer, analyze};
 pub use codegen::{CodeGenerator, generate_ir};
+pub use error::{
+    CompilerError, ParserError, TypeError, CodegenError,
+    ErrorLanguage, get_error_language, set_error_language,
+    report_error, report_error_lang,
+};

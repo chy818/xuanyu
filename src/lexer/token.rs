@@ -290,6 +290,24 @@ static KEYWORD_MAP: LazyLock<std::collections::HashMap<&'static str, Keyword>> =
     map.insert("情况", Keyword::情况);
     map.insert("默认", Keyword::默认);
 
+    // ========== 控制流 (英文别名) ==========
+    map.insert("if", Keyword::若);
+    map.insert("then", Keyword::则);
+    map.insert("else", Keyword::否则);
+    map.insert("elif", Keyword::否则若);
+    map.insert("while", Keyword::当);
+    map.insert("until", Keyword::直到);
+    map.insert("loop", Keyword::循环);
+    map.insert("from", Keyword::从);
+    map.insert("to", Keyword::到);
+    map.insert("in", Keyword::取自);
+    map.insert("continue", Keyword::跳过);
+    map.insert("break", Keyword::退出);
+    map.insert("for", Keyword::遍历);
+    map.insert("match", Keyword::匹配);
+    map.insert("case", Keyword::情况);
+    map.insert("default", Keyword::默认);
+
     // ========== 函数与协程 ==========
     map.insert("函数", Keyword::函数);
     map.insert("过程", Keyword::过程);
@@ -297,6 +315,14 @@ static KEYWORD_MAP: LazyLock<std::collections::HashMap<&'static str, Keyword>> =
     map.insert("异步", Keyword::异步);
     map.insert("等待", Keyword::等待);
     map.insert("启动", Keyword::启动);
+
+    // ========== 函数与协程 (英文别名) ==========
+    map.insert("fn", Keyword::函数);
+    map.insert("proc", Keyword::过程);
+    map.insert("return", Keyword::返回);
+    map.insert("async", Keyword::异步);
+    map.insert("await", Keyword::等待);
+    map.insert("spawn", Keyword::启动);
 
     // ========== 数据类型 ==========
     map.insert("整数", Keyword::整数);
@@ -314,6 +340,23 @@ static KEYWORD_MAP: LazyLock<std::collections::HashMap<&'static str, Keyword>> =
     map.insert("或", Keyword::或);
     map.insert("且", Keyword::且);
 
+    // ========== 数据类型 (英文别名) ==========
+    map.insert("int", Keyword::整数);
+    map.insert("i64", Keyword::整数);
+    map.insert("long", Keyword::长整数);
+    map.insert("float", Keyword::浮点数);
+    map.insert("f64", Keyword::浮点数);
+    map.insert("double", Keyword::双精度);
+    map.insert("bool", Keyword::布尔);
+    map.insert("string", Keyword::文本);
+    map.insert("str", Keyword::文本);
+    map.insert("char", Keyword::字符);
+    map.insert("void", Keyword::无返回);
+    map.insert("ptr", Keyword::指针);
+    map.insert("pointer", Keyword::指针);
+    map.insert("list", Keyword::列表);
+    map.insert("Option", Keyword::或许);
+
     // ========== 内存安全与所有权 ==========
     map.insert("定义", Keyword::定义);
     map.insert("可变", Keyword::可变);
@@ -323,6 +366,17 @@ static KEYWORD_MAP: LazyLock<std::collections::HashMap<&'static str, Keyword>> =
     map.insert("手动", Keyword::手动);
     map.insert("原生", Keyword::原生);
 
+    // ========== 内存安全与所有权 (英文别名) ==========
+    map.insert("let", Keyword::定义);
+    map.insert("mut", Keyword::可变);
+    map.insert("ref", Keyword::借用);
+    map.insert("borrow", Keyword::借用);
+    map.insert("mut_ref", Keyword::可变借用);
+    map.insert("move", Keyword::拥有);
+    map.insert("own", Keyword::拥有);
+    map.insert("manual", Keyword::手动);
+    map.insert("unsafe", Keyword::原生);
+
     // ========== 可见性与修饰符 ==========
     map.insert("公开", Keyword::公开);
     map.insert("私有", Keyword::私有);
@@ -330,10 +384,24 @@ static KEYWORD_MAP: LazyLock<std::collections::HashMap<&'static str, Keyword>> =
     map.insert("静态", Keyword::静态);
     map.insert("外部", Keyword::外部);
 
+    // ========== 可见性与修饰符 (英文别名) ==========
+    map.insert("public", Keyword::公开);
+    map.insert("private", Keyword::私有);
+    map.insert("const", Keyword::常量);
+    map.insert("static", Keyword::静态);
+    map.insert("extern", Keyword::外部);
+
     // ========== 模块系统 ==========
     map.insert("模块", Keyword::模块);
     map.insert("引入", Keyword::引入);
     map.insert("导出", Keyword::导出);
+
+    // ========== 模块系统 (英文别名) ==========
+    map.insert("module", Keyword::模块);
+    map.insert("import", Keyword::引入);
+    map.insert("use", Keyword::引入);
+    map.insert("export", Keyword::导出);
+    map.insert("pub", Keyword::导出);
 
     // ========== 错误处理 ==========
     map.insert("尝试", Keyword::尝试);
@@ -341,11 +409,23 @@ static KEYWORD_MAP: LazyLock<std::collections::HashMap<&'static str, Keyword>> =
     map.insert("抛出", Keyword::抛出);
     map.insert("最终", Keyword::最终);
 
+    // ========== 错误处理 (英文别名) ==========
+    map.insert("try", Keyword::尝试);
+    map.insert("catch", Keyword::捕获);
+    map.insert("throw", Keyword::抛出);
+    map.insert("finally", Keyword::最终);
+
     // ========== 复合数据类型 ==========
     map.insert("结构体", Keyword::结构体);
     map.insert("枚举", Keyword::枚举);
     map.insert("联合", Keyword::联合);
     map.insert("类型", Keyword::类型别名);
+
+    // ========== 复合数据类型 (英文别名) ==========
+    map.insert("struct", Keyword::结构体);
+    map.insert("enum", Keyword::枚举);
+    map.insert("union", Keyword::联合);
+    map.insert("type", Keyword::类型别名);
 
     // ========== 布尔字面量 (特殊: 是字面量但用中文表示) ==========
     // 真/假 在词法阶段作为标识符处理，解析阶段识别为布尔字面量
