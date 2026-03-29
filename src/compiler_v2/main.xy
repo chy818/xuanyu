@@ -703,7 +703,17 @@
     打印(filePath)
 
     定义 可变 source: 文本
-    source = "函数 主(): 整数 { 打印(\"Hello\") 返回 0 }"
+    source = 文件读取(filePath)
+
+    若 source == "" 则 {
+        打印("错误: 无法读取文件或文件为空: ")
+        打印(filePath)
+        返回 错误代码文件错误
+    }
+
+    打印("源文件大小: ")
+    打印(文本长度(source))
+    打印(" 字节")
 
     定义 可变 tokens: 列表
     tokens = runLexerStage(source)

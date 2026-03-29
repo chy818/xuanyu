@@ -406,15 +406,47 @@ impl CodeGenerator {
 
     /**
      * 计算结构体字段偏移
-     * 简化处理：使用哈希表存储结构体字段信息
+     * 根据结构体定义计算字段在内存中的偏移量（以字节为单位）
      */
     fn calculate_field_offset(&self, field_name: &str) -> i32 {
-        // 常见的 Token 字段偏移（以 8 字节为单位）
+        // Token 结构体字段偏移
         match field_name {
             "类型" | "type" => 0,
+            "值" | "value" => 8,
             "字面量" | "literal" => 8,
-            "行" | "line" => 16,
-            "列" | "column" => 24,
+            "行号" | "line" => 16,
+            "列号" | "column" => 24,
+            "开始位置" => 32,
+            "结束位置" => 40,
+            // Lexer 结构体字段偏移
+            "源码" | "source" => 0,
+            "位置" | "pos" | "position" => 8,
+            "长度" | "len" | "length" => 16,
+            "当前字符" => 24,
+            "token列表" => 32,
+            // LexerContext 结构体字段偏移
+            "状态" | "state" => 0,
+            "起始位置" => 8,
+            "当前位置" => 16,
+            "错误信息" => 32,
+            "是否错误" => 40,
+            // Parser 结构体字段偏移
+            "tokens" => 0,
+            "errors" => 16,
+            "nodeCount" => 24,
+            "tokenCount" => 32,
+            "源码长度" => 40,
+            "parserPos" => 48,
+            "当前行号" => 56,
+            "当前列号" => 64,
+            "错误计数" => 72,
+            "警告计数" => 80,
+            // AST节点 结构体字段偏移
+            "id" | "kind" => 0,
+            "name" => 8,
+            "value" => 16,
+            "intValue" => 24,
+            "children" => 32,
             _ => 0, // 默认偏移
         }
     }
@@ -806,7 +838,7 @@ impl CodeGenerator {
                             "整数转文本" | "int_to_str" => "i8*".to_string(),
                             "文本转整数" | "str_to_int" => "i64".to_string(),
                             "文本长度" | "str_len" | "文本拼接" | "str_concat" => "i8*".to_string(),
-                            "文本获取字符" | "str_char_at" => "i64".to_string(),
+                            "文本获取字符" | "str_char_at" => "i8*".to_string(),
                             "文本切片" | "str_slice" => "i8*".to_string(),
                             "提取子串" | "substring" => "i8*".to_string(),
                             "是关键字" | "is_keyword" => "i64".to_string(),
@@ -820,15 +852,8 @@ impl CodeGenerator {
                 if let Some(ref member_ty) = member.get_member_type() {
                     type_to_llvm(member_ty).to_string()
                 } else {
-                    // 如果没有语义分析类型，使用字段名推断
-                    if member.member == "值" || member.member == "value" ||
-                       member.member == "源码" || member.member == "source" ||
-                       member.member == "字面量" || member.member == "literal" ||
-                       member.member == "名称" || member.member == "name" {
-                        "i8*".to_string()
-                    } else {
-                        "i64".to_string()
-                    }
+                    // 使用字段名推断类型
+                    self.infer_member_type(&member.member).to_string()
                 }
             }
             Expr::Unary(unary) => {
@@ -1641,8 +1666,15 @@ impl CodeGenerator {
         // 获取变量类型
         let var_type = let_stmt.type_annotation
             .as_ref()
-            .map(|t| type_to_llvm(t))
-            .unwrap_or("i64");
+            .map(|t| type_to_llvm(t).to_string())
+            .unwrap_or_else(|| {
+                // 如果没有类型注解，从初始化表达式推断
+                if let Some(init) = &let_stmt.initializer {
+                    self.infer_expression_type(init)
+                } else {
+                    "i64".to_string()
+                }
+            });
 
         // 分配局部变量
         let alloca = self.new_label("alloca");
@@ -1680,7 +1712,7 @@ impl CodeGenerator {
         // 记录变量及其类型 - 使用翻译后的名字
         let translated_name = self.translate_func_name(&let_stmt.name);
         self.variables.insert(translated_name.clone(), alloca);
-        self.variable_types.insert(translated_name, var_type.to_string());
+        self.variable_types.insert(translated_name, var_type);
 
         Ok(())
     }
@@ -2160,15 +2192,15 @@ impl CodeGenerator {
                     // 计算字段偏移
                     let field_offset = self.calculate_field_offset(field_name);
 
-                    // 根据语义分析确定的成员类型决定指针类型
+                    // 根据语义分析或字段名推断成员类型
                     let ptr_type = if let Some(ref member_ty) = member.get_member_type() {
                         type_to_llvm(member_ty)
                     } else {
-                        "i64"  // 默认类型
+                        self.infer_member_type(field_name)
                     };
 
-                    // 将 i64 值转换为指针
-                    let ptr_val = self.new_label("id");
+                    // 将对象值转换为 i8* 指针
+                    let ptr_val = self.new_label("ptr");
                     self.emit(&format!("%{} = inttoptr i64 %{} to i8*", ptr_val, object_val));
 
                     // 生成 GEP 指令获取字段指针
@@ -2184,6 +2216,9 @@ impl CodeGenerator {
                     let result_val = self.new_label("member_val");
                     self.emit(&format!("%{} = load {}, {}* %{}", result_val, ptr_type, ptr_type, result_ptr));
 
+                    // 直接返回加载的值，类型保持一致：
+                    // - 列表/字符串字段返回 i8*
+                    // - 整数字段返回 i64
                     Ok(result_val)
                 }
             }
@@ -2826,6 +2861,47 @@ impl CodeGenerator {
     }
 
     /**
+     * 判断是否是已知的方法名
+     * 用于区分方法调用和字段访问
+     */
+    fn is_known_method(&self, name: &str) -> bool {
+        matches!(name,
+            // 列表方法
+            "追加" | "获取" | "长度" | "添加" | "设置" |
+            "append" | "get" | "len" | "add" | "set" |
+            // 字符串方法
+            "文本获取字符" | "文本长度" | "文本切片" | "文本拼接" | "文本包含" |
+            "str_char_at" | "str_len" | "str_slice" | "str_concat" | "str_contains" |
+            // 其他内置方法
+            "字符编码" | "char_to_code"
+        )
+    }
+
+    /**
+     * 根据字段名推断成员类型
+     * 用于语义分析未设置类型时的回退
+     */
+    fn infer_member_type(&self, field_name: &str) -> &'static str {
+        match field_name {
+            // 文本类型字段
+            "源码" | "source" | "值" | "value" | "字面量" | "literal" |
+            "名称" | "name" | "错误信息" => "i8*",
+            // 整数类型字段
+            "类型" | "type" | "位置" | "pos" | "position" |
+            "长度" | "len" | "length" | "行号" | "line" |
+            "列号" | "column" | "当前字符" | "状态" | "state" |
+            "起始位置" | "当前位置" | "是否错误" | "id" | "kind" |
+            "intValue" | "nodeCount" | "tokenCount" | "源码长度" |
+            "parserPos" | "当前行号" | "当前列号" | "错误计数" | "警告计数" |
+            "开始位置" | "结束位置" => "i64",
+            // 列表类型字段
+            "token列表" | "tokens" | "errors" | "children" => "i8*",
+            // 默认为整数类型
+            _ => "i64"
+        }
+    }
+
+    /**
      * 生成函数调用表达式
      */
     fn generate_call_expr(&mut self, call: &CallExpr) -> Result<String, CodegenError> {
@@ -2833,9 +2909,18 @@ impl CodeGenerator {
         let (func_name, is_method_call, method_object) = match &*call.function {
             Expr::Identifier(ident) => (ident.name.clone(), false, None),
             Expr::MemberAccess(member) => {
-                // 方法调用：MemberAccess(member_object, method_name)
-                let object_val = self.generate_expression(&member.object)?;
-                (member.member.clone(), true, Some(object_val))
+                // 区分方法调用和字段访问
+                // 方法调用：已知的方法名（列表方法、字符串方法等）
+                // 字段访问：不是方法，但被当作函数调用（如 ctx.当前位置）
+                let is_known_method = self.is_known_method(&member.member);
+                if is_known_method {
+                    // 方法调用：MemberAccess(member_object, method_name)
+                    let object_val = self.generate_expression(&member.object)?;
+                    (member.member.clone(), true, Some(object_val))
+                } else {
+                    // 字段访问当作普通函数调用
+                    (member.member.clone(), false, None)
+                }
             }
             _ => ("unknown".to_string(), false, None),
         };
@@ -2977,7 +3062,28 @@ impl CodeGenerator {
         // 如果是方法调用，将对象指针作为第一个参数
         if is_method_call {
             if let Some(obj_ptr) = method_object {
-                args.push(format!("i8* %{}", obj_ptr));
+                // 方法调用的对象可能是 i64（存储为整数）或 i8*（指针）
+                // 需要从 MemberAccess 中获取对象的类型
+                let obj_type = match &*call.function {
+                    Expr::MemberAccess(member) => {
+                        // 获取对象的类型，而不是成员的类型
+                        self.infer_expression_type(&member.object)
+                    }
+                    _ => {
+                        // 回退：使用 call.function 的类型
+                        self.infer_expression_type(&call.function)
+                    }
+                };
+                
+                if obj_type == "i8*" {
+                    // 已经是 i8* 类型
+                    args.push(format!("i8* %{}", obj_ptr));
+                } else {
+                    // 需要转换为 i8*
+                    let ptr_val = self.new_label("obj_ptr");
+                    self.emit(&format!("%{} = inttoptr i64 %{} to i8*", ptr_val, obj_ptr));
+                    args.push(format!("i8* %{}", ptr_val));
+                }
             }
         }
 
@@ -3018,9 +3124,26 @@ impl CodeGenerator {
                 }
             } else if is_builtin_to_int || is_file_func || is_str_func {
                 // 文本转整数、文件函数、字符串函数
-                // 但文本获取字符的第二个参数是索引 (i64)
-                if is_str_char_at && idx == 1 {
-                    args.push(format!("i64 %{}", arg_val));
+                // 文本获取字符：第一个参数是字符串，第二个参数是索引 (i64)
+                // 方法调用时：对象已在 args[0]，idx=0 对应 index，idx=1 对应字符串（不应该出现）
+                // 函数调用时：idx=0 对应字符串，idx=1 对应 index
+                if is_str_char_at {
+                    // 文本获取字符：source (i8*), index (i64)
+                    // 函数调用：文本获取字符(source, index) -> args = [source, index]
+                    // 方法调用：source.文本获取字符(index) -> receiver已添加, index来自call.arguments[0]
+                    // 方法调用时 receiver 在循环前添加，所以 call.arguments[0] 是 index
+                    // 函数调用时 call.arguments[0] 是 source
+                    if is_method_call {
+                        // 方法调用：call.arguments[0] 是 index (i64)
+                        args.push(format!("i64 %{}", arg_val));
+                    } else {
+                        // 函数调用：call.arguments[0] 是 source (i8*), call.arguments[1] 是 index (i64)
+                        if idx == 0 {
+                            args.push(format!("i8* %{}", arg_val));  // source
+                        } else {
+                            args.push(format!("i64 %{}", arg_val));  // index
+                        }
+                    }
                 } else {
                     args.push(format!("i8* %{}", arg_val));
                 }
@@ -3176,8 +3299,8 @@ impl CodeGenerator {
             Ok(result)
         } else if args.is_empty() {
             if is_void_call {
+                // void 函数调用不能有返回值
                 self.emit(&format!("call {} @{}({})", ret_type, llvm_func_ref, ""));
-                self.emit(&format!("%{} = add i64 0, 0", result));
             } else {
                 self.emit(&format!("%{} = call {} @{}({})", result, ret_type, llvm_func_ref, ""));
             }
@@ -3203,7 +3326,14 @@ impl CodeGenerator {
                 // 用户函数（非内置函数）- 根据函数签名确定返回类型
                 if let Some(func) = self.function_signatures.get(&func_name) {
                     let ret_type = type_to_llvm(&func.return_type);
-                    self.emit(&format!("%{} = call {} @{}({})", result, ret_type, llvm_func_ref, args_str));
+                    if func.return_type == Type::Void {
+                        // void 函数调用不能有返回值
+                        self.emit(&format!("call {} @{}({})", ret_type, llvm_func_ref, args_str));
+                        // 为 void 函数生成一个虚拟返回值
+                        self.emit(&format!("%{} = add i64 0, 0", result));
+                    } else {
+                        self.emit(&format!("%{} = call {} @{}({})", result, ret_type, llvm_func_ref, args_str));
+                    }
                 } else {
                     self.emit(&format!("%{} = call i64 @{}({})", result, llvm_func_ref, args_str));
                 }
