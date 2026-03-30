@@ -14,7 +14,7 @@ $SRC_DIR = Join-Path $PROJECT_ROOT "src\compiler_v2"
 $TARGET_DIR = Join-Path $PROJECT_ROOT "target"
 $L1_DIR = Join-Path $TARGET_DIR "l1_ir"
 
-$XY_COMPILER = Join-Path $TARGET_DIR "debug\xy.exe"
+$XY_COMPILER = Join-Path $TARGET_DIR "release\xy.exe"
 
 Write-Host "[1/3] Checking Rust compiler..."
 if (-not (Test-Path $XY_COMPILER)) {

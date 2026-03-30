@@ -120,6 +120,54 @@
     返回 result
 }
 
+/**
+ * 获取文件扩展名（别名函数）
+ */
+函数 获取文件扩展名(path: 文本): 文本 {
+    返回 getFileExtension(path)
+}
+
+/**
+ * 检查文件是否存在（别名函数）
+ */
+函数 文件存在(path: 文本): 整数 {
+    返回 fileExists(path)
+}
+
+/**
+ * 获取文件名前缀
+ */
+函数 获取文件名前缀(path: 文本): 文本 {
+    定义 可变 prefix: 文本
+    prefix = ""
+    若 path == "" 则 {
+        返回 prefix
+    }
+    定义 可变 ext: 文本
+    ext = getFileExtension(path)
+    若 ext == "" 则 {
+        返回 path
+    }
+    定义 可变 extLen: 整数
+    extLen = 文本长度(ext)
+    定义 可变 pathLen: 整数
+    pathLen = 文本长度(path)
+    定义 可变 prefixLen: 整数
+    prefixLen = pathLen - extLen
+    若 prefixLen >= 0 则 {
+        prefix = 文本切片(path, 0, prefixLen)
+    }
+    返回 prefix
+}
+
+/**
+ * 获取系统可用内存（简化实现）
+ */
+函数 获取系统可用内存(): 整数 {
+    // 简化实现，返回 2GB
+    返回 2147483648
+}
+
 /* ============ 编译错误处理 ============ */
 
 结构体 CompileError {

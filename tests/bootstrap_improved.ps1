@@ -29,6 +29,12 @@ $XY_MODULES = @(
     "main.xy"
 )
 
+# Clean output directories completely
+Write-Host "Cleaning output directory..."
+if (Test-Path $OUTPUT_DIR) {
+    Remove-Item -Recurse -Force $OUTPUT_DIR
+}
+
 # Create output directories
 New-Item -ItemType Directory -Force -Path $OUTPUT_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $L1_IR_DIR | Out-Null

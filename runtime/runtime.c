@@ -193,6 +193,16 @@ void* int_to_str(int64_t val) {
     return result;
 }
 
+/* Integer to float */
+double int_to_float(int64_t val) {
+    return (double)val;
+}
+
+/* Float to integer */
+int64_t float_to_int(double val) {
+    return (int64_t)val;
+}
+
 /* String to integer */
 int64_t str_to_int(void* str) {
     if (!str) return 0;

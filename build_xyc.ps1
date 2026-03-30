@@ -14,9 +14,9 @@ $SRC_DIR = Join-Path $PROJECT_ROOT "src\compiler_v2"
 $TARGET_DIR = Join-Path $PROJECT_ROOT "target"
 $XYC_DIR = Join-Path $TARGET_DIR "xyc"
 
-$XY_COMPILER = Join-Path $TARGET_DIR "debug\xy.exe"
+$XY_COMPILER = Join-Path $TARGET_DIR "release\xy.exe"
 
-Write-Host "[1/6] Checking Rust compiler..."
+Write-Host "[1/4] Checking Rust compiler..."
 if (-not (Test-Path $XY_COMPILER)) {
     Write-Host "ERROR: Rust compiler not found: $XY_COMPILER"
     Write-Host "Run: cargo build"
@@ -25,7 +25,7 @@ if (-not (Test-Path $XY_COMPILER)) {
 Write-Host "OK: Rust compiler found: $XY_COMPILER"
 Write-Host ""
 
-Write-Host "[2/6] Creating output directory..."
+Write-Host "[2/4] Creating output directory..."
 if (-not (Test-Path $XYC_DIR)) {
     New-Item -ItemType Directory -Path $XYC_DIR -Force | Out-Null
 }
@@ -34,12 +34,7 @@ Write-Host ""
 
 Write-Host "[3/6] Compiling XY modules to IR..."
 $xyFiles = @(
-    "src\compiler_v2\runtime.xy",
-    "src\compiler_v2\lexer.xy",
-    "src\compiler_v2\parser.xy",
-    "src\compiler_v2\sema.xy",
-    "src\compiler_v2\codegen.xy",
-    "src\compiler_v2\main.xy"
+    "src\compiler_v2\compiler.xy"
 )
 
 $successCount = 0
@@ -95,7 +90,7 @@ foreach ($xyFile in $xyFiles) {
 }
 
 Write-Host ""
-Write-Host "[4/6] Compilation Summary"
+Write-Host "[3/4] Compilation Summary"
 Write-Host "----------------------------------------"
 Write-Host "  Success: $successCount"
 Write-Host "  Failed:  $failCount"
@@ -108,7 +103,7 @@ if ($failCount -gt 0) {
     exit 1
 }
 
-Write-Host "[5/6] Linking xyc.exe..."
+Write-Host "[4/4] Linking xyc.exe..."
 $runtimePath = Join-Path $PROJECT_ROOT "runtime\runtime.c"
 if (-not (Test-Path $runtimePath)) {
     Write-Host "ERROR: runtime.c not found: $runtimePath"
@@ -127,7 +122,7 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Host ""
-Write-Host "[6/6] Final Summary"
+Write-Host "[4/4] Final Summary"
 Write-Host "----------------------------------------"
 Write-Host "  L2 Build Complete!"
 Write-Host "  xyc.exe: $xycExe"
