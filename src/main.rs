@@ -58,6 +58,9 @@ fn main() {
             "--ir" => {
                 run_mode = RunMode::IrOnly;
             }
+            "--ir-pure" => {
+                run_mode = RunMode::IrPure;
+            }
             "repl" | "--repl" | "-i" => {
                 // 启动 REPL 模式
                 xuanyu::start_repl(None);
@@ -86,7 +89,8 @@ fn main() {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RunMode {
-    IrOnly,  // 只生成 IR
+    IrOnly,  // 只生成 IR（带调试信息）
+    IrPure,  // 只输出纯 IR（无调试信息）
     Build,   // 生成可执行文件
     Run,     // 编译并运行
 }
@@ -96,8 +100,11 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
     let source = fs::read_to_string(filename)
         .map_err(|e| format!("无法读取文件 '{}': {}", filename, e))?;
 
-    println!("正在编译: {}", filename);
-    println!("源文件大小: {} 字节", source.len());
+    // 如果是纯 IR 模式，不输出调试信息
+    if mode != RunMode::IrPure {
+        println!("正在编译: {}", filename);
+        println!("源文件大小: {} 字节", source.len());
+    }
 
     // ========== 增量编译检查 ==========
     let cache_valid = check_cache(filename, &source)?;
@@ -109,42 +116,52 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
     }
 
     // ========== 词法分析 ==========
-    println!("\n=== 词法分析 ===");
+    if mode != RunMode::IrPure {
+        println!("\n=== 词法分析 ===");
+    }
     let mut lexer = xuanyu::Lexer::new(source.clone());
     
     let tokens = lexer.tokenize()
         .map_err(|e| format!("词法错误 [{}]: {} (行 {}, 列 {})", 
             e.code, e.message, e.span.start_line, e.span.start_column))?;
     
-    println!("词法分析完成，共 {} 个 Token", tokens.len());
+    if mode != RunMode::IrPure {
+        println!("词法分析完成，共 {} 个 Token", tokens.len());
 
-    // 打印前 10 个 Token (调试用)
-    for (i, token) in tokens.iter().take(10).enumerate() {
-        if token.token_type == xuanyu::TokenType::文件结束 {
-            break;
+        // 打印前 10 个 Token (调试用)
+        for (i, token) in tokens.iter().take(10).enumerate() {
+            if token.token_type == xuanyu::TokenType::文件结束 {
+                break;
+            }
+            println!("  {:4}: {:?}", i + 1, token);
         }
-        println!("  {:4}: {:?}", i + 1, token);
     }
 
     // ========== 语法分析 ==========
-    println!("\n=== 语法分析 ===");
+    if mode != RunMode::IrPure {
+        println!("\n=== 语法分析 ===");
+    }
     let ast = xuanyu::parse(tokens)
         .map_err(|e| format!("语法错误 [{}]: {} (行 {}, 列 {})", 
             e.code, e.message, e.span.start_line, e.span.start_column))?;
 
-    println!("语法分析完成");
-    println!("  函数数量: {}", ast.functions.len());
-    
-    for func in &ast.functions {
-        println!("    - {} (参数: {}, 返回类型: {:?})", 
-            func.name, 
-            func.params.len(),
-            func.return_type
-        );
+    if mode != RunMode::IrPure {
+        println!("语法分析完成");
+        println!("  函数数量: {}", ast.functions.len());
+        
+        for func in &ast.functions {
+            println!("    - {} (参数: {}, 返回类型: {:?})", 
+                func.name, 
+                func.params.len(),
+                func.return_type
+            );
+        }
     }
 
     // ========== 语义分析 ==========
-    println!("\n=== 语义分析 ===");
+    if mode != RunMode::IrPure {
+        println!("\n=== 语义分析 ===");
+    }
     xuanyu::analyze(&ast)
         .map_err(|errors| {
             let msg: Vec<String> = errors.iter()
@@ -154,14 +171,20 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
             format!("语义错误 ({} 个): {}", errors.len(), msg.join(", "))
         })?;
 
-    println!("语义分析完成，无错误");
+    if mode != RunMode::IrPure {
+        println!("语义分析完成，无错误");
+    }
 
     // ========== 代码生成 ==========
-    println!("\n=== 代码生成 ===");
+    if mode != RunMode::IrPure {
+        println!("\n=== 代码生成 ===");
+    }
     let ir = xuanyu::generate_ir(&ast)
         .map_err(|e| format!("代码生成错误 [{}]: {}", e.code, e.message))?;
 
-    println!("代码生成完成");
+    if mode != RunMode::IrPure {
+        println!("代码生成完成");
+    }
 
     // 根据模式执行不同操作
     match mode {
@@ -169,6 +192,10 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
             println!("\n--- LLVM IR ---");
             println!("{}", ir);
             println!("\n编译成功!");
+        }
+        RunMode::IrPure => {
+            // 只输出纯 IR，没有其他信息
+            println!("{}", ir);
         }
         RunMode::Build | RunMode::Run => {
             // 保存 IR 到临时文件 - 使用唯一名称
@@ -382,7 +409,8 @@ fn print_usage(program: &str) {
     println!();
     println!("选项:");
     println!("  -h, --help    显示此帮助信息");
-    println!("  --ir          只生成 LLVM IR (默认)");
+    println!("  --ir          只生成 LLVM IR (带调试信息，默认)");
+    println!("  --ir-pure     只输出纯 LLVM IR (无调试信息)");
     println!("  --build       生成可执行文件");
     println!("  --run         编译并运行程序");
     println!();

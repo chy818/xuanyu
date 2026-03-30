@@ -658,9 +658,12 @@ impl Parser {
         // 期望 '函数' 关键字
         self.expect(&TokenType::Keyword(Keyword::函数))?;
         
-        // 函数名
+        // 函数名（支持关键字作为函数名，如：列表、文本等）
         let name = match self.current() {
             Some(Token { token_type: TokenType::标识符, literal, .. }) => {
+                literal.clone()
+            }
+            Some(Token { token_type: TokenType::Keyword(_), literal, .. }) => {
                 literal.clone()
             }
             _ => {

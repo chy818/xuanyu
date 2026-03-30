@@ -2247,14 +2247,15 @@ impl CodeGenerator {
                     let result_ptr = self.new_label("member_ptr");
                     self.emit(&format!("%{} = bitcast i8* %{} to {}*", result_ptr, result, ptr_type));
 
-                    // 加载字段值
-                    let result_val = self.new_label("member_val");
-                    self.emit(&format!("%{} = load {}, {}* %{}", result_val, ptr_type, ptr_type, result_ptr));
-
-                    // 保持字段的原始类型
-                    // 列表/字符串字段保持 i8* 类型
-                    // 整数字段保持 i64 类型
-                    Ok(result_val)
+                    // 对于指针类型（i8*），直接返回指针，不需要 load
+                    if ptr_type == "i8*" {
+                        Ok(result_ptr)
+                    } else {
+                        // 对于其他类型，加载字段值
+                        let result_val = self.new_label("member_val");
+                        self.emit(&format!("%{} = load {}, {}* %{}", result_val, ptr_type, ptr_type, result_ptr));
+                        Ok(result_val)
+                    }
                 }
             }
             Expr::Grouped(expr) => {

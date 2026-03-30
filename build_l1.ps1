@@ -1,22 +1,22 @@
-# build_xyc.ps1
-# L2: Complete build - Compile XY modules to object files and link to xyc.exe
-# Usage: .\build_xyc.ps1
+# build_l1.ps1
+# L1: Verify all XY modules can be compiled to IR by Rust compiler
+# Usage: .\build_l1.ps1
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================"
-Write-Host "  XY Compiler Builder (Complete L2)"
+Write-Host "  L1: XY Compiler to IR Verification"
 Write-Host "========================================"
 Write-Host ""
 
 $PROJECT_ROOT = $PSScriptRoot
 $SRC_DIR = Join-Path $PROJECT_ROOT "src\compiler_v2"
 $TARGET_DIR = Join-Path $PROJECT_ROOT "target"
-$XYC_DIR = Join-Path $TARGET_DIR "xyc"
+$L1_DIR = Join-Path $TARGET_DIR "l1_ir"
 
 $XY_COMPILER = Join-Path $TARGET_DIR "debug\xy.exe"
 
-Write-Host "[1/6] Checking Rust compiler..."
+Write-Host "[1/3] Checking Rust compiler..."
 if (-not (Test-Path $XY_COMPILER)) {
     Write-Host "ERROR: Rust compiler not found: $XY_COMPILER"
     Write-Host "Run: cargo build"
@@ -25,14 +25,14 @@ if (-not (Test-Path $XY_COMPILER)) {
 Write-Host "OK: Rust compiler found: $XY_COMPILER"
 Write-Host ""
 
-Write-Host "[2/6] Creating output directory..."
-if (-not (Test-Path $XYC_DIR)) {
-    New-Item -ItemType Directory -Path $XYC_DIR -Force | Out-Null
+Write-Host "[2/3] Creating output directory..."
+if (-not (Test-Path $L1_DIR)) {
+    New-Item -ItemType Directory -Path $L1_DIR -Force | Out-Null
 }
-Write-Host "OK: Output directory: $XYC_DIR"
+Write-Host "OK: Output directory: $L1_DIR"
 Write-Host ""
 
-Write-Host "[3/6] Compiling XY modules to IR..."
+Write-Host "[3/3] Compiling XY modules to IR..."
 $xyFiles = @(
     "src\compiler_v2\runtime.xy",
     "src\compiler_v2\lexer.xy",
@@ -44,15 +44,13 @@ $xyFiles = @(
 
 $successCount = 0
 $failCount = 0
-$objFiles = @()
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 foreach ($xyFile in $xyFiles) {
     $fullPath = Join-Path $PROJECT_ROOT $xyFile
     $fileName = Split-Path $xyFile -Leaf
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
-    $irFile = Join-Path $XYC_DIR "$baseName.ll"
-    $objFile = Join-Path $XYC_DIR "$baseName.o"
+    $irFile = Join-Path $L1_DIR "$baseName.ll"
 
     Write-Host "  Compiling: $fileName"
 
@@ -75,18 +73,7 @@ foreach ($xyFile in $xyFiles) {
     if ($exitCode -eq 0) {
         [System.IO.File]::WriteAllLines($irFile, $irContent, $utf8NoBom)
         Write-Host "    OK: IR saved to $irFile"
-        
-        # Compile IR to object file
-        Write-Host "    Assembling to object file..."
-        llc $irFile -filetype=obj -o $objFile
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "    OK: Object file saved to $objFile"
-            $objFiles += $objFile
-            $successCount++
-        } else {
-            Write-Host "    ERROR: Failed to assemble IR"
-            $failCount++
-        }
+        $successCount++
     } else {
         Write-Host "    FAILED (exit code: $exitCode)"
         Write-Host "    Output: $irContent"
@@ -95,47 +82,23 @@ foreach ($xyFile in $xyFiles) {
 }
 
 Write-Host ""
-Write-Host "[4/6] Compilation Summary"
+Write-Host "L1 Build Summary"
 Write-Host "----------------------------------------"
 Write-Host "  Success: $successCount"
 Write-Host "  Failed:  $failCount"
 Write-Host ""
 
-if ($failCount -gt 0) {
+if ($failCount -eq 0) {
     Write-Host "========================================"
-    Write-Host "  Build Failed - Some modules failed"
+    Write-Host "  L1 Success - All modules compiled!"
     Write-Host "========================================"
-    exit 1
-}
-
-Write-Host "[5/6] Linking xyc.exe..."
-$runtimePath = Join-Path $PROJECT_ROOT "runtime\runtime.c"
-if (-not (Test-Path $runtimePath)) {
-    Write-Host "ERROR: runtime.c not found: $runtimePath"
-    exit 1
-}
-
-$xycExe = Join-Path $XYC_DIR "xyc.exe"
-Write-Host "  Linking with runtime: $runtimePath"
-
-clang $runtimePath $objFiles -o $xycExe "-Wl,/subsystem:console"
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "  OK: xyc.exe created at $xycExe"
+    Write-Host ""
+    Write-Host "IR files saved to: $L1_DIR"
+    Write-Host ""
+    exit 0
 } else {
-    Write-Host "  ERROR: Linking failed"
+    Write-Host "========================================"
+    Write-Host "  L1 Build Failed"
+    Write-Host "========================================"
     exit 1
 }
-
-Write-Host ""
-Write-Host "[6/6] Final Summary"
-Write-Host "----------------------------------------"
-Write-Host "  L2 Build Complete!"
-Write-Host "  xyc.exe: $xycExe"
-Write-Host ""
-Write-Host "========================================"
-Write-Host "  L2 Build Complete - xyc.exe ready!"
-Write-Host "========================================"
-Write-Host ""
-Write-Host "Next: Test L3 bootstrap"
-Write-Host ""
-exit 0

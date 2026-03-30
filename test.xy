@@ -1,9 +1,0 @@
-/**
- * @file test.xy
- * @brief 简单测试程序
- */
-
-函数 主(): 整数 {
-    打印("Hello from test.xy!")
-    返回 0
-}
