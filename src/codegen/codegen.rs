@@ -2025,11 +2025,9 @@ impl CodeGenerator {
         // 注意：如果循环是无限循环（条件始终为真）且没有 break，loop_end 可能不可达
         // 但我们仍然需要生成它，因为 break 语句可能跳转到这里
         self.emit_label(&loop_end);
-        // 添加 unreachable 指令，确保标签后有指令
-        self.emit("unreachable");
 
-        // 循环结束后处于尾位置
-        self.in_tail_position = true;
+        // 循环结束后不处于尾位置，因为后面还有代码
+        self.in_tail_position = false;
 
         Ok(())
     }
