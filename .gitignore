@@ -60,6 +60,9 @@ scripts/*.py
 *.py
 build_*.py
 
+# Windows 批处理脚本
+*.bat
+
 # 缓存文件
 *.xy.cache
 
