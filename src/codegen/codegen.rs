@@ -843,6 +843,7 @@ impl CodeGenerator {
                             "整数转浮点数" | "int_to_float" => "double".to_string(),
                             "浮点数转整数" | "float_to_int" => "i64".to_string(),
                             "列表" | "rt_list_new" | "创建列表" | "create_list" => "i8*".to_string(),
+                            "参数数量" | "参数个数" | "argc" => "i64".to_string(),
                             "argv" => "i8*".to_string(),
                             "获取参数" => "i8*".to_string(),
                             "读取文件" | "file_read" | "文件读取" => "i8*".to_string(),
@@ -1133,6 +1134,7 @@ impl CodeGenerator {
         self.emit("declare i8* @cmd_output(i8*)");
         
         // 命令行参数函数
+        self.emit("declare void @init_args(i64, i8**)");
         self.emit("declare i64 @argc()");
         self.emit("declare i8* @argv(i64)");
         
@@ -1222,7 +1224,11 @@ impl CodeGenerator {
      */
     fn generate_main_wrapper(&mut self, return_type: &Type) {
         let translated_main = self.translate_func_name("主");
-        self.emit("define i32 @main() {");
+        self.emit("define i32 @main(i32 %argc, i8** %argv) {");
+        
+        // 初始化命令行参数
+        self.emit("  %argc_i64 = sext i32 %argc to i64");
+        self.emit("  call void @init_args(i64 %argc_i64, i8** %argv)");
         
         match return_type {
             Type::Void => {
@@ -1277,7 +1283,7 @@ impl CodeGenerator {
             "rt_list_new" | "rt_list_append" | "rt_list_get" | "rt_list_len" |
             "str_to_int" | "int_to_str" | "create_list" | "list_add" | "list_get" | "list_len" |
             "file_read" | "file_write" | "file_exists" | "file_delete" |
-            "exec_cmd" | "cmd_output" | "argc" | "argv" |
+            "exec_cmd" | "cmd_output" | "init_args" | "argc" | "argv" |
             "str_concat" | "str_slice" | "str_contains" |
             "rt_closure_destroy" | "malloc"
         );
@@ -3374,7 +3380,7 @@ impl CodeGenerator {
         let is_str_func = is_str_len || is_str_concat || is_str_slice || is_str_contains || is_str_substr || is_str_char_at;
         
         // 检查是否是命令行参数函数
-        let is_arg_count = func_name == "参数个数" || func_name == "argc";
+        let is_arg_count = func_name == "参数数量" || func_name == "参数个数" || func_name == "argc";
         let is_arg_get = func_name == "获取参数" || func_name == "argv";
         let is_arg_func = is_arg_count || is_arg_get;
         
@@ -3412,6 +3418,7 @@ impl CodeGenerator {
             "文本获取字符" => "rt_string_char_at".to_string(),
             "字符编码" => "rt_char_to_code".to_string(),
             // 命令行参数函数
+            "参数数量" => "argc".to_string(),
             "参数个数" => "argc".to_string(),
             "获取参数" => "argv".to_string(),
             // 系统命令函数
@@ -3438,7 +3445,7 @@ impl CodeGenerator {
             "追加" | "获取" | "长度" |
             "输入整数" | "输入文本" | "读取行" |
             "文本长度" | "文本拼接" | "文本切片" | "文本包含" | "提取子串" | "文本获取字符" | "字符编码" |
-            "参数个数" | "获取参数" |
+            "参数数量" | "参数个数" | "获取参数" |
             "文件读取" | "文件写入" | "文件存在" | "文件删除" |
             "执行命令" | "命令输出" |
             "报错" | "详细输出" | "append"

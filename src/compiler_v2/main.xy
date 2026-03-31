@@ -826,16 +826,13 @@
     打印("自展版本")
     打印("")
 
-    // 获取命令行参数
+    // 从运行时获取命令行参数
     定义 可变 argc: 整数
-    argc = 0 // 暂时简化，实际需要从运行时获取
-
-    定义 可变 argv: 列表
-    argv = 列表()
+    argc = 参数数量()
 
     // 解析命令行选项
     定义 可变 opts: CompileOptions
-    opts = parseArgs(argc, argv)
+    opts = parseArgs(argc, 列表())
 
     // 如果没有参数，显示帮助
     若 opts.显示帮助 == 1 || argc == 0 则 {
