@@ -1,0 +1,100 @@
+// Xuanyu Interactive Calculator
+// Supports addition, subtraction, multiplication, division
+
+函数 主(): 整数 {
+    打印("========================================");
+    打印("       Welcome to Xuanyu Calculator!");
+    打印("========================================");
+    打印("");
+
+    循环 {
+        打印("Please select operation:");
+        打印("  1. Addition (+) ");
+        打印("  2. Subtraction (-)");
+        打印("  3. Multiplication (*)");
+        打印("  4. Division (/)");
+        打印("  5. Exit");
+        打印("");
+        打印("Enter your choice (1-5): ");
+
+        定义 choice: 整数 = 输入整数();
+
+        如果 choice == 5 则 {
+            打印("");
+            打印("========================================");
+            打印("     Thank you for using! Goodbye!");
+            打印("========================================");
+            跳出;
+        }
+
+        如果 choice < 1 || choice > 4 则 {
+            打印("");
+            打印("Invalid choice! Please try again.");
+            打印("");
+            继续;
+        }
+
+        打印("");
+        打印("Enter first number: ");
+        定义 a: 整数 = 输入整数();
+
+        打印("Enter second number: ");
+        定义 b: 整数 = 输入整数();
+
+        打印("");
+
+        如果 choice == 1 则 {
+            定义 result: 整数 = a + b;
+            打印("Result: ");
+            打印整数(a);
+            打印(" + ");
+            打印整数(b);
+            打印(" = ");
+            打印整数(result);
+            打印("\n");
+        }
+
+        如果 choice == 2 则 {
+            定义 result: 整数 = a - b;
+            打印("Result: ");
+            打印整数(a);
+            打印(" - ");
+            打印整数(b);
+            打印(" = ");
+            打印整数(result);
+            打印("\n");
+        }
+
+        如果 choice == 3 则 {
+            定义 result: 整数 = a * b;
+            打印("Result: ");
+            打印整数(a);
+            打印(" * ");
+            打印整数(b);
+            打印(" = ");
+            打印整数(result);
+            打印("\n");
+        }
+
+        如果 choice == 4 则 {
+            如果 b == 0 则 {
+                打印("Error: Cannot divide by zero!\n");
+            } 否则 {
+                定义 result: 整数 = a / b;
+                打印("Result: ");
+                打印整数(a);
+                打印(" / ");
+                打印整数(b);
+                打印(" = ");
+                打印整数(result);
+                打印("\n");
+            }
+        }
+
+        打印("");
+        打印("----------------------------------------");
+        打印("\n");
+    }
+
+    返回 0;
+}

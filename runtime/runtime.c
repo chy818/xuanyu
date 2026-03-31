@@ -288,13 +288,26 @@ void* argv(int64_t index) {
 }
 
 /* Input functions */
-int64_t input_int() {
-    int64_t val;
-    if (scanf("%lld", &val) == 1) return val;
+int64_t rt_input_int() {
+    char buffer[64];
+    if (fgets(buffer, sizeof(buffer), stdin) != NULL) {
+        // Remove trailing newline
+        size_t len = strlen(buffer);
+        if (len > 0 && buffer[len-1] == '\n') buffer[len-1] = '\0';
+        // Skip UTF-8 BOM if present (0xEF 0xBB 0xBF)
+        unsigned char* p = (unsigned char*)buffer;
+        if (p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF) {
+            p += 3;
+        }
+        // Skip leading whitespace
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '\0') return 0;
+        return atoll((char*)p);
+    }
     return 0;
 }
 
-void* input_text() {
+void* rt_input_text() {
     static char buffer[4096];
     if (fgets(buffer, sizeof(buffer), stdin)) {
         size_t len = strlen(buffer);

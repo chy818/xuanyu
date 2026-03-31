@@ -51,6 +51,7 @@ MCP.json
 # xy 编译器输出
 *.ir
 out/
+dist/
 
 # 构建脚本（仅保留 build_*.ps1 在 scripts 目录）
 scripts/*.ps1
