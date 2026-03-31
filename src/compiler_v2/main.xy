@@ -743,18 +743,19 @@
 /**
  * 编译单个源文件
  */
-函数 compileFile(filePath: 文本): 整数 {
+函数 compileFile(opts: CompileOptions): 整数 {
     打印("")
     打印("=== 开始编译 ===")
     打印("文件: ")
-    打印(filePath)
+    打印(opts.输入文件)
 
+    // 读取源文件
     定义 可变 source: 文本
-    source = 文件读取(filePath)
+    source = 文件读取(opts.输入文件)
 
     若 source == "" 则 {
         打印("错误: 无法读取文件或文件为空: ")
-        打印(filePath)
+        打印(opts.输入文件)
         返回 错误代码文件错误
     }
 
@@ -762,15 +763,19 @@
     打印(文本长度(source))
     打印(" 字节")
 
+    // 词法分析
     定义 可变 tokens: 列表
     tokens = runLexerStage(source)
 
+    // 语法分析
     定义 可变 ast: AST节点
     ast = runParserStage(tokens, source)
 
+    // 语义分析
     定义 可变 semaResult: 整数
     semaResult = runSemaStage(ast)
 
+    // 代码生成
     定义 可变 ir: 文本
     ir = ""
 
@@ -778,6 +783,39 @@
         ir = runCodegenStage(ast)
     } 否则 {
         打印("跳过代码生成（语义分析失败）")
+    }
+
+    // 处理编译输出选项
+    若 semaResult == 0 则 {
+        // 如果是只生成 IR 模式
+        若 opts.生成IR == 1 则 {
+            打印("")
+            打印("--- LLVM IR ---")
+            打印(ir)
+        }
+
+        // 如果指定了输出文件，保存 IR 到文件
+        若 opts.输出文件 != "" 则 {
+            定义 可变 outputPath: 文本
+            outputPath = opts.输出文件
+            
+            // 如果输出文件没有扩展名，添加 .ll
+            定义 可变 ext: 文本
+            ext = 获取文件扩展名(outputPath)
+            若 ext == "" 则 {
+                outputPath = outputPath + ".ll"
+            }
+            
+            打印("")
+            打印("保存 IR 到文件: ")
+            打印(outputPath)
+            定义 可变 writeResult: 整数
+            writeResult = 文件写入(outputPath, ir)
+            若 writeResult != 0 则 {
+                打印("错误: 无法写入文件: ")
+                打印(outputPath)
+            }
+        }
     }
 
     打印("")
@@ -862,7 +900,7 @@
 
     // 执行编译
     定义 可变 result: 整数
-    result = compileFile(opts.输入文件)
+    result = compileFile(opts)
 
     返回 result
 }
