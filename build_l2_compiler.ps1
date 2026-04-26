@@ -7,9 +7,11 @@ if (-not (Test-Path "target\l2_compiler")) {
     New-Item -ItemType Directory -Path "target\l2_compiler" -Force | Out-Null
 }
 
-$LLC_EXE = "llc"
-$CL_EXE = "cl"
-$LINK_EXE = "link"
+# LLVM 工具链路径
+$LLVM_PATH = "C:\Program Files\LLVM\bin"
+$LLC_EXE = "$LLVM_PATH\llc.exe"
+$CL_EXE = "$LLVM_PATH\clang.exe"
+$LINK_EXE = "$LLVM_PATH\lld-link.exe"
 
 $MODULES = @("runtime.xy", "lexer.xy", "parser.xy", "sema.xy", "codegen.xy", "utils.xy", "main.xy")
 
@@ -44,7 +46,9 @@ foreach ($module in $MODULES) {
 Write-Host "[3] Compiling C runtime library..."
 Write-Host ""
 
-& $CL_EXE /c /O2 "runtime\runtime.c" /Fo"target\l2_compiler\runtime.obj"
+# 使用 clang 替代 cl 编译 runtime.c
+# 添加 -w 选项抑制所有警告以减少干扰
+& $CL_EXE -c -O2 -w "runtime\runtime.c" -o "target\l2_compiler\runtime.obj"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Failed to compile runtime.c!"
     exit 1
@@ -66,8 +70,10 @@ $OBJS = @(
     "target\l2_compiler\runtime.obj"
 )
 
-$OBJS_STRING = $OBJS -join " "
-& $LINK_EXE /OUT:"target\l2_compiler\xyc.exe" $OBJS_STRING /NOLOGO
+# 使用 lld-link 进行链接
+# /FORCE 允许重复符号，强制生成可执行文件
+# 添加 /MANIFEST:NO 避免嵌入清单导致的问题
+& $LINK_EXE -OUT:"target\l2_compiler\xyc.exe" $OBJS "/FORCE" "/MANIFEST:NO"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Linking failed!"
     exit 1
