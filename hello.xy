@@ -1,0 +1,9 @@
+/**
+ * @file hello.xy
+ * @brief 简单的Hello World程序
+ */
+
+函数 主函数(): 整数 {
+    打印("Hello, World!")
+    返回 0
+}
