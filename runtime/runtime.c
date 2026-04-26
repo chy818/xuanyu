@@ -72,6 +72,14 @@ int64_t rt_list_len(void* list_ptr) {
     return list->count;
 }
 
+/* Set list element at index */
+void rt_list_set(void* list_ptr, int64_t index, void* value) {
+    if (!list_ptr) return;
+    List* list = (List*)list_ptr;
+    if (index < 0 || index >= list->count) return;
+    list->items[index] = value;
+}
+
 /* Print functions */
 void print(void* str) {
     if (str) printf("%s", (char*)str);

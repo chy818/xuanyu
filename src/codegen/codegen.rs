@@ -46,7 +46,7 @@ fn type_to_llvm(ty: &Type) -> &'static str {
         Type::TypeVar(_) => "i64",  // 类型变量暂时用 i64 代替
         Type::Function(_, _) => "i8*",  // 函数类型用指针（闭包结构体指针）
         Type::Future(_) => "i8*",   // Future 类型用指针表示
-        Type::Any => "i64",          // 任意类型用 i64 存储（指针值）
+        Type::Any => "i8*",          // 任意类型用 i8* 存储（指针值）
         Type::Custom(name) => {
             match name.as_str() {
                 _ => "i64",
@@ -505,6 +505,7 @@ impl CodeGenerator {
             "列表追加" => Some("rt_list_append"),
             "列表获取" => Some("rt_list_get"),
             "列表长度" => Some("rt_list_len"),
+            "列表设置" => Some("rt_list_set"),
             "文本长度" => Some("rt_string_len"),
             "文本获取字符" => Some("rt_string_char_at"),
             "字符编码" => Some("rt_char_to_code"),
@@ -1111,6 +1112,7 @@ impl CodeGenerator {
         self.emit("declare void @rt_list_append(i8*, i8*)");
         self.emit("declare i8* @rt_list_get(i8*, i64)");
         self.emit("declare i64 @rt_list_len(i8*)");
+        self.emit("declare void @rt_list_set(i8*, i64, i8*)");
         
         // 文本操作
         self.emit("declare i64 @rt_string_len(i8*)");
@@ -1204,6 +1206,13 @@ impl CodeGenerator {
             }
         }
 
+        // 生成字符串常量（在所有函数之后，但在常量定义之前）
+        // 注意：LLVM IR 允许全局定义在函数之后引用，只要在同一个翻译单元中即可
+        self.emit("");
+        self.emit("; ==================== 字符串常量 ====================");
+        self.emit("");
+        self.generate_string_constants();
+
         // 生成外部函数声明 (FFI)
         if !module.extern_functions.is_empty() {
             self.emit("");
@@ -1223,12 +1232,6 @@ impl CodeGenerator {
                 self.generate_global_constant(constant)?;
             }
         }
-
-        // 在用户函数之后生成字符串常量
-        self.emit("");
-        self.emit("; ==================== 字符串常量 ====================");
-        self.emit("");
-        self.generate_string_constants();
 
         // 清理输出：去除开头和结尾的空行
         let mut result = self.ir_output.clone();
@@ -1305,7 +1308,7 @@ impl CodeGenerator {
             "print" | "print_int" | "print_float" | "print_bool" |
             "rt_input_int" | "rt_input_text" | "rt_readline" | "rt_error" |
             "rt_string_len" | "rt_string_char_at" | "rt_char_to_code" |
-            "rt_list_new" | "rt_list_append" | "rt_list_get" | "rt_list_len" |
+            "rt_list_new" | "rt_list_append" | "rt_list_get" | "rt_list_len" | "rt_list_set" |
             "str_to_int" | "int_to_str" | "create_list" | "list_add" | "list_get" | "list_len" |
             "file_read" | "file_write" | "file_exists" | "file_delete" |
             "exec_cmd" | "cmd_output" | "init_args" | "argc" | "argv" |
@@ -1509,10 +1512,10 @@ impl CodeGenerator {
         }
         let params_str = param_strs.join(", ");
 
-        // 翻译函数名
-        let llvm_func_name = self.translate_func_name(&func_name);
+        // 对于函数定义，使用原始函数名（避免与运行时函数冲突）
+        let llvm_func_name = self.escape_llvm_ident(&func_name);
 
-        // 始终使用翻译后的函数名（已确保 LLVM 兼容）
+        // 使用原始函数名生成函数定义（已确保 LLVM 兼容）
         let func_def = format!("define {} @{} ({}) {{", ret_type, llvm_func_name, params_str);
         self.emit(&func_def);
         self.emit(&format!("; 函数: {}", func.name));
@@ -3385,8 +3388,9 @@ impl CodeGenerator {
         let is_list_add = func_name == "列表添加" || func_name == "list_add";
         let is_list_get = func_name == "列表获取" || func_name == "list_get";
         let is_list_len = func_name == "列表长度" || func_name == "list_len";
+        let is_list_set = func_name == "列表设置" || func_name == "rt_list_set";
         let is_list_constructor = func_name == "列表";
-        let is_list_func = is_list_create || is_list_add || is_list_get || is_list_len || is_list_constructor;
+        let is_list_func = is_list_create || is_list_add || is_list_get || is_list_len || is_list_set || is_list_constructor;
         
         // 检查是否是控制台输入函数
         let is_input_int = func_name == "输入整数";
@@ -3425,6 +3429,8 @@ impl CodeGenerator {
             "列表添加" => "list_add".to_string(),
             "列表获取" => "list_get".to_string(),
             "列表长度" => "list_len".to_string(),
+            "列表设置" => "rt_list_set".to_string(),  // 列表设置函数
+            "列表追加" => "rt_list_append".to_string(),  // 列表追加函数
             // 列表方法（通过 . 语法调用）
             "追加" => "rt_list_append".to_string(),
             "获取" => "rt_list_get".to_string(),
@@ -3464,8 +3470,8 @@ impl CodeGenerator {
         // 内置函数使用 ASCII 名称，用户函数使用 emit_func_decl 转义
         let is_builtin = matches!(func_name.as_str(), 
             "打印" | "打印换行" | "打印文本" | "打印整数" | "打印浮点" | "打印布尔" |
-            "文本转整数" | "整数转文本" | "整数转浮点数" | "浮点数转整数" | "创建列表" | "列表" | "列表添加" | "列表获取" | "列表长度" |
-            "追加" | "获取" | "长度" |
+            "文本转整数" | "整数转文本" | "整数转浮点数" | "浮点数转整数" | "创建列表" | "列表" | "列表添加" | "列表获取" | "列表长度" | "列表设置" | "列表追加" |
+            "追加" | "获取" | "设置" | "长度" |
             "输入整数" | "输入文本" | "读取行" |
             "文本长度" | "文本拼接" | "文本切片" | "文本包含" | "提取子串" | "文本获取字符" | "字符编码" |
             "参数数量" | "参数个数" | "获取参数" |
@@ -3571,6 +3577,13 @@ impl CodeGenerator {
                     }
                 } else if is_list_get {
                     if idx == 0 {
+                        "i8*".to_string()
+                    } else {
+                        "i64".to_string()
+                    }
+                } else if is_list_set {
+                    // rt_list_set(i8*, i64, i8*) - 列表, 索引, 值
+                    if idx == 0 || idx == 2 {
                         "i8*".to_string()
                     } else {
                         "i64".to_string()

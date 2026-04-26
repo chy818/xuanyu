@@ -5,15 +5,22 @@ if (-not (Test-Path "target\l2_compiler")) {
     New-Item -ItemType Directory -Path "target\l2_compiler" -Force | Out-Null
 }
 
-# 编译模块到 IR
 Write-Host "编译模块到 LLVM IR..."
-cargo run --release -- src\compiler_v2\runtime.xy --ir-pure 2>&1 | Out-File "target\l2_compiler\runtime.xy.ll" -Encoding UTF8
-cargo run --release -- src\compiler_v2\lexer.xy --ir-pure 2>&1 | Out-File "target\l2_compiler\lexer.xy.ll" -Encoding UTF8
-cargo run --release -- src\compiler_v2\parser.xy --ir-pure 2>&1 | Out-File "target\l2_compiler\parser.xy.ll" -Encoding UTF8
-cargo run --release -- src\compiler_v2\sema.xy --ir-pure 2>&1 | Out-File "target\l2_compiler\sema.xy.ll" -Encoding UTF8
-cargo run --release -- src\compiler_v2\codegen.xy --ir-pure 2>&1 | Out-File "target\l2_compiler\codegen.xy.ll" -Encoding UTF8
-cargo run --release -- src\compiler_v2\utils.xy --ir-pure 2>&1 | Out-File "target\l2_compiler\utils.xy.ll" -Encoding UTF8
-cargo run --release -- src\compiler_v2\main.xy --ir-pure 2>&1 | Out-File "target\l2_compiler\main.xy.ll" -Encoding UTF8
+Write-Host "编译 runtime.xy..."
+$env:RUST_BACKTRACE = "0"
+$process = Start-Process -FilePath "cargo" -ArgumentList "run", "--release", "--", "src\compiler_v2\runtime.xy", "--ir-pure" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "target\l2_compiler\runtime.xy.ll"
+Write-Host "编译 lexer.xy..."
+$process = Start-Process -FilePath "cargo" -ArgumentList "run", "--release", "--", "src\compiler_v2\lexer.xy", "--ir-pure" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "target\l2_compiler\lexer.xy.ll"
+Write-Host "编译 parser.xy..."
+$process = Start-Process -FilePath "cargo" -ArgumentList "run", "--release", "--", "src\compiler_v2\parser.xy", "--ir-pure" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "target\l2_compiler\parser.xy.ll"
+Write-Host "编译 sema.xy..."
+$process = Start-Process -FilePath "cargo" -ArgumentList "run", "--release", "--", "src\compiler_v2\sema.xy", "--ir-pure" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "target\l2_compiler\sema.xy.ll"
+Write-Host "编译 codegen.xy..."
+$process = Start-Process -FilePath "cargo" -ArgumentList "run", "--release", "--", "src\compiler_v2\codegen.xy", "--ir-pure" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "target\l2_compiler\codegen.xy.ll"
+Write-Host "编译 utils.xy..."
+$process = Start-Process -FilePath "cargo" -ArgumentList "run", "--release", "--", "src\compiler_v2\utils.xy", "--ir-pure" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "target\l2_compiler\utils.xy.ll"
+Write-Host "编译 main.xy..."
+$process = Start-Process -FilePath "cargo" -ArgumentList "run", "--release", "--", "src\compiler_v2\main.xy", "--ir-pure" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "target\l2_compiler\main.xy.ll"
 
 # 编译 IR 为目标文件
 Write-Host "编译 IR 为目标文件..."

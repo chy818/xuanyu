@@ -100,6 +100,7 @@
     若 typeName == "布尔" 则 { 返回 "i1" }
     若 typeName == "文本" || typeName == "字符" 则 { 返回 "i8*" }
     若 typeName == "无返回" 则 { 返回 "void" }
+    若 typeName == "任意" || typeName == "列表" 则 { 返回 "i8*" }
     返回 "i64"
 }
 
@@ -2894,18 +2895,27 @@
     若 bodyIdx < 列表长度(funcNode.children) 则 {
         定义 可变 body: AST节点
         body = 列表获取(funcNode.children, bodyIdx)
-        
+
+        /* 检查函数体是否有返回语句 */
+        定义 可变 bodyHasReturn: 整数
+        bodyHasReturn = codegen块语句有返回语句(cg, body)
+
         若 body.kind == 18 则 {
             /* 块语句 */
             codegen遍历块语句(cg, body)
-            /* 确保块语句结束后有返回语句 */
-            codegenEmit(cg, "  %tmp0 = add i64 0, 0")
-            codegenEmit(cg, "  ret i64 %tmp0")
+            /* 只有当块语句没有返回语句时，才添加默认返回 */
+            若 bodyHasReturn == 0 则 {
+                codegenEmit(cg, "  %tmp0 = add i64 0, 0")
+                codegenEmit(cg, "  ret i64 %tmp0")
+            }
         } 否则 {
             /* 单表达式函数体 */
             定义 可变 result: 文本
             result = codegen遍历表达式(cg, body)
-            codegenEmit(cg, "  ret i64 %" + result)
+            /* 只有当函数体不是返回语句时，才添加返回 */
+            若 body.kind != 8 则 {
+                codegenEmit(cg, "  ret i64 %" + result)
+            }
         }
     } 否则 {
         /* 空函数体，返回 0 */
@@ -2919,7 +2929,7 @@
 }
 
 /**
- * 检查块语句是否有返回语句
+ * 检查块语句是否有返回语句（递归检查嵌套结构）
  * @param cg 代码生成器
  * @param block 块语句节点
  * @return 如果有返回语句返回1，否则返回0
@@ -2945,6 +2955,33 @@
         /* 检查是否是返回语句 */
         若 stmt.kind == 8 则 {
             返回 1
+        }
+
+        /* 检查是否是 if 语句 - 递归检查 then 块 */
+        若 stmt.kind == 5 则 {
+            定义 可变 thenBlock: AST节点
+            thenBlock = 列表获取(stmt.children, 1)
+            若 codegen块语句有返回语句(cg, thenBlock) == 1 则 {
+                返回 1
+            }
+        }
+
+        /* 检查是否是 while 语句 - 递归检查 body */
+        若 stmt.kind == 6 则 {
+            定义 可变 body: AST节点
+            body = 列表获取(stmt.children, 1)
+            若 codegen块语句有返回语句(cg, body) == 1 则 {
+                返回 1
+            }
+        }
+
+        /* 检查是否是 for 语句 - 递归检查 body */
+        若 stmt.kind == 20 则 {
+            定义 可变 body: AST节点
+            body = 列表获取(stmt.children, 3)
+            若 codegen块语句有返回语句(cg, body) == 1 则 {
+                返回 1
+            }
         }
 
         i = i + 1
@@ -3579,30 +3616,32 @@
     /* 特殊处理列表操作函数 */
     若 funcName == "_u5217_u8868_u8ffd_u52a0" 则 {
         /* 列表添加/追加 */
-        line = "%" + result + " = call i64 @_u5217_u8868_u8ffd_u52a0(i8* %" + result + ", i64 %" + result + ")"
-        codegenEmit(cg, line)
-        返回 result
-    } 否则 若 funcName == "_u5217_u8868_u8bbe_u7f6e" 则 {
-        /* 列表设置 */
-        line = "call void @_u5217_u8868_u8bbe_u7f6e(i8* %" + result + ", i64 0, i64 %" + result + ")"
-        codegenEmit(cg, line)
-        返回 result
-    } 否则 若 funcName == "_u5217_u8868_u83b7_u53d6" 则 {
-        /* 列表获取 */
-        line = "%" + result + " = call i64 @_u5217_u8868_u83b7_u53d6(i8* %" + result + ", i64 0)"
-        codegenEmit(cg, line)
-        返回 result
-    } 否则 若 funcName == "_u5217_u8868_u957f_u5ea6" 则 {
-        /* 列表长度 */
-        line = "%" + result + " = call i64 @_u5217_u8868_u957f_u5ea6(i8* %" + result + ")"
-        codegenEmit(cg, line)
-        返回 result
-    } 否则 {
-        /* 其他函数 */
-        line = "%" + result + " = call i64 @" + funcName + "()"
+        line = "%" + result + " = call i64 @_u5217_u8868_u8ffd_u52a0(i8* null, i64 0)"
         codegenEmit(cg, line)
         返回 result
     }
+    若 funcName == "_u5217_u8868_u8bbe_u7f6e" 则 {
+        /* 列表设置 */
+        line = "call void @_u5217_u8868_u8bbe_u7f6e(i8* null, i64 0, i64 0)"
+        codegenEmit(cg, line)
+        返回 result
+    }
+    若 funcName == "_u5217_u8868_u83b7_u53d6" 则 {
+        /* 列表获取 */
+        line = "%" + result + " = call i64 @_u5217_u8868_u83b7_u53d6(i8* null, i64 0)"
+        codegenEmit(cg, line)
+        返回 result
+    }
+    若 funcName == "_u5217_u8868_u957f_u5ea6" 则 {
+        /* 列表长度 */
+        line = "%" + result + " = call i64 @_u5217_u8868_u957f_u5ea6(i8* null)"
+        codegenEmit(cg, line)
+        返回 result
+    }
+    /* 其他函数 */
+    line = "%" + result + " = call i64 @" + funcName + "()"
+    codegenEmit(cg, line)
+    返回 result
 }
 
 /**

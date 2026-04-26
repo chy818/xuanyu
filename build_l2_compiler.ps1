@@ -18,8 +18,8 @@ Write-Host ""
 
 foreach ($module in $MODULES) {
     Write-Host "Compiling $module..."
-    cargo run --release -- "src\compiler_v2\$module" --ir-pure 2>&1 | Out-File "target\l2_compiler\$module.ll" -Encoding UTF8
-    if ($LASTEXITCODE -ne 0) {
+    $process = Start-Process -FilePath "cargo" -ArgumentList "run", "--release", "--", "src\compiler_v2\$module", "--ir-pure" -NoNewWindow -Wait -PassThru -RedirectStandardOutput "target\l2_compiler\$module.ll"
+    if ($process.ExitCode -ne 0) {
         Write-Host "Failed to compile $module!"
         exit 1
     }
