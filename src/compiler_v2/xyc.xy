@@ -1,0 +1,14 @@
+/**
+ * @file xyc.xy
+ * @brief 玄语自展编译器 - 统一编译入口
+ * @description 整合所有模块，构建完整的编译器
+ */
+
+引入 "types"
+引入 "runtime"
+引入 "lexer_s"
+引入 "parser_s"
+引入 "sema_s"
+引入 "codegen_s"
+引入 "utils_s"
+引入 "compiler_new"

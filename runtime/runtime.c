@@ -168,6 +168,37 @@ void* rt_str_concat(void* a, void* b) {
     return result;
 }
 
+/* 字符串比较函数 */
+int64_t rt_str_eq(void* a, void* b) {
+    if (!a && !b) return 1;  // 两个都是 NULL，认为相等
+    if (!a || !b) return 0;  // 一个是 NULL，另一个不是，不相等
+    return strcmp((char*)a, (char*)b) == 0 ? 1 : 0;
+}
+
+int64_t rt_str_ne(void* a, void* b) {
+    return !rt_str_eq(a, b);
+}
+
+int64_t rt_str_lt(void* a, void* b) {
+    if (!a || !b) return 0;
+    return strcmp((char*)a, (char*)b) < 0 ? 1 : 0;
+}
+
+int64_t rt_str_le(void* a, void* b) {
+    if (!a || !b) return 0;
+    return strcmp((char*)a, (char*)b) <= 0 ? 1 : 0;
+}
+
+int64_t rt_str_gt(void* a, void* b) {
+    if (!a || !b) return 0;
+    return strcmp((char*)a, (char*)b) > 0 ? 1 : 0;
+}
+
+int64_t rt_str_ge(void* a, void* b) {
+    if (!a || !b) return 0;
+    return strcmp((char*)a, (char*)b) >= 0 ? 1 : 0;
+}
+
 /* Character classification functions */
 int is_space(void* ch_ptr) {
     if (!ch_ptr) return 0;

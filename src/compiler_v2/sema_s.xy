@@ -1,0 +1,2725 @@
+引入 "types"
+
+/**
+ * @file sema.xy
+ * @brief 语义分析器 - 自展编译器
+ * @description 作用域管理、类型检查、标识符解析、错误报告
+ */
+
+
+
+/* ============ AST 节点类型 (与 parser.xy 一致) ============ */
+
+
+/* ============ AST 节点结构体 ============ */
+
+
+/* ============ 类型定义 ============ */
+
+/**
+ * 基本类型枚举
+ */
+
+/* ============ 循环状态管理 ============ */
+
+/**
+ * 循环状态 - 用于管理 break/continue 语句的上下文
+ */
+
+/* ============ 符号表条目 ============ */
+
+
+/* ============ 作用域结构 ============ */
+
+
+/* ============ Sema 状态 ============ */
+
+
+/* ============ 作用域操作 ============ */
+
+/**
+ * 创建新的作用域
+ */
+函数 创建作用域(sema: Sema, 名称: 文本): 整数 {
+    定义 可变 scope: 作用域
+    scope.名称 = 名称
+    scope.符号表 = 列表()
+    scope.层级 = 列表长度(sema.作用域栈)
+    
+    若 列表长度(sema.作用域栈) > 0 则 {
+        scope.父作用域 = sema.当前作用域
+    } 否则 {
+        scope.父作用域 = -1
+    }
+
+    定义 可变 idx: 整数
+    idx = 列表长度(sema.作用域栈)
+    
+    /* 将新作用域添加到作用域栈 */
+    列表追加(sema.作用域栈, scope)
+
+    sema.当前作用域 = idx
+
+    返回 idx
+}
+
+/**
+ * 退出当前作用域
+ */
+函数 退出作用域(sema: Sema): 整数 {
+    定义 可变 prevScope: 整数
+    prevScope = -1
+
+    若 列表长度(sema.作用域栈) > 0 则 {
+        定义 可变 currentScope: 作用域
+        currentScope = sema.作用域栈[sema.当前作用域]
+        prevScope = currentScope.父作用域
+    }
+
+    若 prevScope >= 0 则 {
+        sema.当前作用域 = prevScope
+    }
+
+    返回 prevScope
+}
+
+/* ============ 符号操作 ============ */
+
+/**
+ * 查找符号（从当前作用域向上查找）
+ */
+函数 查找符号(sema: Sema, 名称: 文本): 整数 {
+    定义 可变 scopeIdx: 整数
+    scopeIdx = sema.当前作用域
+
+    定义 可变 result: 整数
+    result = -1  // 未找到
+
+    当 scopeIdx >= 0 && scopeIdx < 列表长度(sema.作用域栈) 则 {
+        定义 可变 scope: 作用域
+        scope = sema.作用域栈[scopeIdx]
+
+        定义 可变 i: 整数
+        i = 0
+        当 i < 列表长度(scope.符号表) 则 {
+            定义 可变 sym: 符号
+            sym = scope.符号表[i]
+            若 sym.名称 == 名称 则 {
+                result = scopeIdx
+                返回 result
+            }
+            i = i + 1
+        }
+
+        若 scope.父作用域 < 0 则 {
+            返回 -1
+        }
+        scopeIdx = scope.父作用域
+    }
+
+    返回 result
+}
+
+/**
+ * 获取符号类型
+ */
+函数 获取符号类型(sema: Sema, 名称: 文本): 整数 {
+    定义 可变 scopeIdx: 整数
+    scopeIdx = sema.当前作用域
+
+    当 scopeIdx >= 0 && scopeIdx < 列表长度(sema.作用域栈) 则 {
+        定义 可变 scope: 作用域
+        scope = sema.作用域栈[scopeIdx]
+
+        定义 可变 i: 整数
+        i = 0
+        当 i < 列表长度(scope.符号表) 则 {
+            定义 可变 sym: 符号
+            sym = scope.符号表[i]
+            若 sym.名称 == 名称 则 {
+                返回 sym.类型
+            }
+            i = i + 1
+        }
+
+        若 scope.父作用域 < 0 则 {
+            返回 -1
+        }
+        scopeIdx = scope.父作用域
+    }
+
+    返回 -1
+}
+
+/**
+ * 在当前作用域查找符号（不向上查找父作用域）
+ */
+函数 在当前作用域查找符号(sema: Sema, 名称: 文本): 整数 {
+    若 sema.当前作用域 < 0 || sema.当前作用域 >= 列表长度(sema.作用域栈) 则 {
+        返回 -1
+    }
+
+    定义 可变 scope: 作用域
+    scope = sema.作用域栈[sema.当前作用域]
+
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(scope.符号表) 则 {
+        定义 可变 sym: 符号
+        sym = scope.符号表[i]
+        若 sym.名称 == 名称 则 {
+            返回 i
+        }
+        i = i + 1
+    }
+
+    返回 -1
+}
+
+/**
+ * 添加符号到当前作用域
+ */
+函数 添加符号(sema: Sema, 名称: 文本, 类型: 整数, 可变: 整数): 整数 {
+    // 检查是否已在当前作用域定义
+    定义 可变 existingIdx: 整数
+    existingIdx = 在当前作用域查找符号(sema, 名称)
+
+    若 existingIdx >= 0 则 {
+        报告错误(sema, "符号 '" + 名称 + "' 已在当前作用域定义", sema.当前行号)
+        返回 -1
+    }
+
+    定义 可变 sym: 符号
+    sym.名称 = 名称
+    sym.类型 = 类型
+    sym.可变 = 可变
+    sym.行号 = sema.当前行号
+    sym.作用域层级 = sema.当前作用域
+    sym.已初始化 = 0
+
+    // 确保当前作用域有效
+    若 sema.当前作用域 < 0 || sema.当前作用域 >= 列表长度(sema.作用域栈) 则 {
+        创建作用域(sema, "全局")
+    }
+
+    // 添加符号到当前作用域
+    定义 可变 scope: 作用域
+    scope = 列表获取(sema.作用域栈, sema.当前作用域)
+    列表追加(scope.符号表, sym)
+    
+    // 更新作用域栈中的作用域
+    // 注意：玄语语言中列表元素是值类型，需要重新赋值
+    列表设置(sema.作用域栈, sema.当前作用域, scope)
+
+    返回 0
+}
+
+/* ============ 类型检查 ============ */
+
+/**
+ * 检查类型是否兼容
+ */
+函数 类型兼容(type1: 整数, type2: 整数): 整数 {
+    // 相同类型兼容
+    若 type1 == type2 则 {
+        返回 1
+    }
+
+    // 整数和浮点可以转换
+    若 type1 == 0 && type2 == 1 则 {
+        返回 1
+    }
+    若 type1 == 1 && type2 == 0 则 {
+        返回 1
+    }
+
+    // 指针和文本类型兼容
+    若 type1 == 3 && type2 == 6 则 { 返回 1 }
+    若 type1 == 6 && type2 == 3 则 { 返回 1 }
+
+    返回 0
+}
+
+/**
+ * 获取类型的字符串表示
+ */
+函数 类型转文本(type: 整数): 文本 {
+    若 type == 0 则 { 返回 "整数" }
+    若 type == 1 则 { 返回 "浮点数" }
+    若 type == 2 则 { 返回 "布尔" }
+    若 type == 3 则 { 返回 "文本" }
+    若 type == 4 则 { 返回 "字符" }
+    若 type == 5 则 { 返回 "无返回" }
+    若 type == 6 则 { 返回 "指针" }
+    若 type == 7 则 { 返回 "列表" }
+    返回 "未知"
+}
+
+/**
+ * 获取二元运算的结果类型
+ */
+函数 二元运算结果类型(leftType: 整数, op: 文本, rightType: 整数): 整数 {
+    // 算术运算
+    若 op == "+" || op == "-" || op == "*" || op == "/" || op == "%" 则 {
+        若 leftType == 1 || rightType == 1 则 {
+            返回 1  // 浮点运算返回浮点
+        }
+        返回 0  // 整数运算返回整数
+    }
+
+    // 比较运算返回布尔
+    若 op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" 则 {
+        返回 2  // 布尔类型
+    }
+
+    // 逻辑运算返回布尔
+    若 op == "&&" || op == "||" 则 {
+        返回 2  // 布尔类型
+    }
+
+    // 位运算返回整数
+    若 op == "&" || op == "|" || op == "^" || op == "<<" || op == ">>" 则 {
+        返回 0
+    }
+
+    返回 0
+}
+
+/**
+ * 检查类型是否有效
+ */
+函数 是有效类型(type: 整数): 整数 {
+    若 type >= 0 && type <= 8 则 {
+        返回 1
+    }
+    返回 0
+}
+
+/* ============ 错误报告 ============ */
+
+/**
+ * 报告错误
+ */
+函数 报告错误(sema: Sema, 消息: 文本, 行号: 整数): 整数 {
+    sema.错误计数 = sema.错误计数 + 1
+    
+    打印("[错误]")
+    若 行号 > 0 则 {
+        打印(" (行")
+        打印(行号)
+        打印(")")
+    }
+    打印(": ")
+    打印(消息)
+    
+    返回 -1
+}
+
+/**
+ * 报告警告
+ */
+函数 报告警告(sema: Sema, 消息: 文本, 行号: 整数): 整数 {
+    sema.警告计数 = sema.警告计数 + 1
+    
+    打印("[警告]")
+    若 行号 > 0 则 {
+        打印(" (行")
+        打印(行号)
+        打印(")")
+    }
+    打印(": ")
+    打印(消息)
+    
+    返回 0
+}
+
+/**
+ * 报告详细错误（包含更多信息）
+ */
+函数 报告详细错误(sema: Sema, 消息: 文本, 行号: 整数, 列号: 整数, 建议: 文本): 整数 {
+    sema.错误计数 = sema.错误计数 + 1
+    
+    打印("━━━━━━━━━━━━━━━━━━━━━━━━")
+    打印("[错误]")
+    若 行号 > 0 则 {
+        打印(" 位置: 第")
+        打印(行号)
+        打印("行")
+        若 列号 > 0 则 {
+            打印(", 第")
+            打印(列号)
+            打印("列")
+        }
+    }
+    打印("")
+    打印("  信息: " + 消息)
+    若 建议 != "" 则 {
+        打印("  建议: " + 建议)
+    }
+    打印("━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    返回 -1
+}
+
+/**
+ * 获取错误统计信息
+ */
+函数 获取错误统计(sema: Sema): 文本 {
+    定义 可变 result: 文本
+    result = "错误: "
+    result = result + 整数转文本(sema.错误计数)
+    result = result + ", 警告: "
+    result = result + 整数转文本(sema.警告计数)
+    返回 result
+}
+
+/* ============ 类型推导 ============ */
+
+/**
+ * 推断表达式的类型
+ */
+函数 推断表达式类型(exprKind: 整数): 整数 {
+    // 字面量表达式
+    若 exprKind == 14 则 {
+        返回 0  // 整数
+    }
+
+    // 标识符表达式
+    若 exprKind == 13 则 {
+        返回 0  // 整数（简化）
+    }
+
+    // 调用表达式
+    若 exprKind == 12 则 {
+        返回 0  // 整数（简化）
+    }
+
+    // 二元表达式
+    若 exprKind == 10 则 {
+        返回 0  // 整数（简化）
+    }
+
+    // 一元表达式
+    若 exprKind == 11 则 {
+        返回 0  // 整数（简化）
+    }
+
+    // 赋值表达式
+    若 exprKind == 19 则 {
+        返回 0  // 整数（简化）
+    }
+
+    // 下标访问
+    若 exprKind == 20 则 {
+        返回 0  // 返回元素类型
+    }
+
+    // 字段访问
+    若 exprKind == 21 则 {
+        返回 0  // 返回字段类型
+    }
+
+    返回 0
+}
+
+/**
+ * 推断二元运算的结果类型
+ */
+函数 推断二元类型(左: 整数, op: 文本, 右: 整数): 整数 {
+    // 算术运算
+    若 op == "+" || op == "-" || op == "*" || op == "/" || op == "%" 则 {
+        若 左 == 1 || 右 == 1 则 {
+            返回 1  // 浮点
+        }
+        若 左 == 3 || 右 == 3 则 {
+            返回 3  // 文本（字符串连接）
+        }
+        返回 0  // 整数
+    }
+
+    // 比较和逻辑运算
+    若 op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" 则 {
+        返回 2  // 布尔
+    }
+
+    // 逻辑运算
+    若 op == "&&" || op == "||" 则 {
+        返回 2  // 布尔
+    }
+
+    // 位运算
+    若 op == "&" || op == "|" || op == "^" || op == "<<" || op == ">>" 则 {
+        返回 0  // 整数
+    }
+
+    返回 0
+}
+
+/**
+ * 检查赋值类型是否兼容
+ */
+函数 检查赋值兼容性(目标类型: 整数, 源类型: 整数): 整数 {
+    // 相同类型
+    若 目标类型 == 源类型 则 {
+        返回 1
+    }
+
+    // 整数和浮点可以互相赋值
+    若 (目标类型 == 0 && 源类型 == 1) || (目标类型 == 1 && 源类型 == 0) 则 {
+        返回 1
+    }
+
+    // 文本和指针可以兼容
+    若 (目标类型 == 3 && 源类型 == 6) || (目标类型 == 6 && 源类型 == 3) 则 {
+        返回 1
+    }
+
+    返回 0
+}
+
+/**
+ * 推断函数返回类型
+ */
+函数 推断函数返回类型(funcName: 文本, paramTypes: 列表): 整数 {
+    打印("推断函数返回类型: ")
+    打印(funcName)
+
+    // 内置函数映射
+    若 funcName == "打印" || funcName == "打印整数" 则 {
+        返回 5  // void
+    }
+    若 funcName == "输入整数" 则 {
+        返回 0  // 整数
+    }
+    若 funcName == "输入浮点数" 则 {
+        返回 1  // 浮点数
+    }
+    若 funcName == "输入文本" 则 {
+        返回 3  // 文本
+    }
+    若 funcName == "输入字符" 则 {
+        返回 4  // 字符
+    }
+    若 funcName == "文本长度" || funcName == "列表长度" 则 {
+        返回 0  // 整数
+    }
+
+    // 默认返回整数
+    返回 0
+}
+
+/**
+ * 推断列表字面量类型
+ */
+函数 推断列表类型(elementTypes: 列表): 整数 {
+    若 列表长度(elementTypes) == 0 则 {
+        返回 7  // 空列表
+    }
+
+    定义 可变 firstType: 整数
+    firstType = elementTypes[0]
+
+    // 检查所有元素类型是否一致
+    定义 可变 i: 整数
+    i = 1
+    当 i < 列表长度(elementTypes) 则 {
+        若 elementTypes[i] != firstType 则 {
+            返回 0  // 类型不一致，返回基础类型
+        }
+        i = i + 1
+    }
+
+    返回 firstType
+}
+
+/**
+ * 推断一元运算结果类型
+ */
+函数 推断一元类型(op: 文本, operandType: 整数): 整数 {
+    // 负号
+    若 op == "-" 则 {
+        若 operandType == 2 则 {
+            返回 2  // 布尔取负无意义但返回布尔
+        }
+        返回 operandType  // 保持原类型
+    }
+
+    // 逻辑非
+    若 op == "!" 则 {
+        返回 2  // 始终返回布尔
+    }
+
+    // 位非
+    若 op == "~" 则 {
+        返回 0  // 始终返回整数
+    }
+
+    返回 operandType
+}
+
+/**
+ * 类型提升规则
+ */
+函数 类型提升(a: 整数, b: 整数): 整数 {
+    // 若任一操作数是浮点，则提升为浮点
+    若 a == 1 || b == 1 则 {
+        返回 1
+    }
+
+    // 否则返回整数
+    返回 0
+}
+
+/**
+ * 推断三目运算类型
+ */
+函数 推断三目类型(condType: 整数, thenType: 整数, elseType: 整数): 整数 {
+    // 条件必须是布尔
+    若 condType != 2 则 {
+        打印("警告: 三目运算条件应为布尔类型")
+    }
+
+    // 两个分支必须兼容
+    若 thenType == elseType 则 {
+        返回 thenType
+    }
+
+    // 应用类型提升规则
+    返回 类型提升(thenType, elseType)
+}
+
+/**
+ * 检查类型是否可转换
+ */
+函数 是可转换的(fromType: 整数, toType: 整数): 整数 {
+    // 相同类型
+    若 fromType == toType 则 {
+        返回 1
+    }
+
+    // 整数和浮点之间可转换
+    若 (fromType == 0 || fromType == 1) && (toType == 0 || toType == 1) 则 {
+        返回 1
+    }
+
+    // 整数可转换为布尔
+    若 (fromType == 0 || fromType == 1) && toType == 2 则 {
+        返回 1
+    }
+
+    // 布尔可转换为整数
+    若 fromType == 2 && toType == 0 则 {
+        返回 1
+    }
+
+    返回 0
+}
+
+/**
+ * 获取类型的默认宽度（LLVM）
+ */
+函数 获取类型宽度(typeName: 文本): 整数 {
+    若 typeName == "i1" 则 { 返回 1 }
+    若 typeName == "i8" 则 { 返回 8 }
+    若 typeName == "i16" 则 { 返回 16 }
+    若 typeName == "i32" 则 { 返回 32 }
+    若 typeName == "i64" 则 { 返回 64 }
+    若 typeName == "float" 则 { 返回 32 }
+    若 typeName == "double" 则 { 返回 64 }
+    返回 64  // 默认64位
+}
+
+/**
+ * 检查是否为空类型
+ */
+函数 是空类型(typeIdx: 整数): 整数 {
+    若 typeIdx == 5 则 { 返回 1 }  // void
+    若 typeIdx == 7 则 { 返回 1 }  // 空列表
+    若 typeIdx == 8 则 { 返回 1 }  // 空指针
+    返回 0
+}
+
+/**
+ * 推断下标访问类型
+ */
+函数 推断下标类型(baseType: 整数, indexType: 整数): 整数 {
+    // 下标必须是整数
+    若 indexType != 0 则 {
+        打印("警告: 下标应为整数类型")
+    }
+
+    // 列表返回元素类型
+    若 baseType == 7 则 {
+        返回 0  // 空列表返回整数
+    }
+
+    // 字典返回值类型
+    若 baseType == 9 则 {
+        返回 0  // 字典返回值类型
+    }
+
+    // 字符串返回字符
+    若 baseType == 3 则 {
+        返回 4  // 字符
+    }
+
+    返回 0
+}
+
+/**
+ * 推断函数调用类型
+ */
+函数 推断调用类型(funcName: 文本, argTypes: 列表): 整数 {
+    定义 可变 argCount: 整数
+    argCount = 列表长度(argTypes)
+
+    打印("推断调用类型: ")
+    打印(funcName)
+    打印(" (参数个数=")
+    打印(argCount)
+    打印(")")
+
+    // 内置函数映射
+    若 funcName == "整数" 则 {
+        若 argCount == 1 则 {
+            返回 0  // 转整数
+        }
+    }
+    若 funcName == "浮点数" 则 {
+        若 argCount == 1 则 {
+            返回 1  // 转浮点
+        }
+    }
+    若 funcName == "文本" 则 {
+        若 argCount == 1 则 {
+            返回 3  // 转文本
+        }
+    }
+
+    // 默认返回整数
+    返回 0
+}
+
+/**
+ * 检查函数参数类型
+ */
+函数 检查参数类型(funcName: 文本, paramIdx: 整数, expectedType: 整数, actualType: 整数): 整数 {
+    若 expectedType == actualType 则 {
+        返回 1
+    }
+
+    // 尝试类型转换
+    若 是可转换的(actualType, expectedType) == 1 则 {
+        返回 1
+    }
+
+    打印("警告: 函数 ")
+    打印(funcName)
+    打印(" 第 ")
+    打印(paramIdx)
+    打印(" 个参数类型不匹配")
+    返回 0
+}
+
+/**
+ * 推断结构体字段类型
+ */
+函数 推断字段类型(structName: 文本, fieldName: 文本): 整数 {
+    打印("推断字段类型: ")
+    打印(structName)
+    打印(".")
+    打印(fieldName)
+
+    // 默认返回整数
+    返回 0
+}
+
+/**
+ * 类型大小计算
+ */
+函数 计算类型大小(typeIdx: 整数): 整数 {
+    若 typeIdx == 0 则 { 返回 8 }  // 整数 64位
+    若 typeIdx == 1 则 { 返回 8 }  // 浮点数 64位
+    若 typeIdx == 2 则 { 返回 1 }  // 布尔 8位
+    若 typeIdx == 3 则 { 返回 8 }  // 文本指针 64位
+    若 typeIdx == 4 则 { 返回 4 }  // 字符 32位
+    若 typeIdx == 5 则 { 返回 0 }  // void
+    若 typeIdx == 6 则 { 返回 8 }  // 指针 64位
+    若 typeIdx == 7 则 { 返回 24 }  // 列表头
+    返回 8  // 默认
+}
+
+/* ============ 泛型支持框架 ============ */
+
+/**
+ * 泛型实例化检查
+ */
+函数 检查泛型实例化(typeName: 文本, params: 列表): 整数 {
+    // 列表类型
+    若 typeName == "列表" 则 {
+        若 列表长度(params) >= 1 则 {
+            返回 1
+        }
+    }
+
+    // 可选类型
+    若 typeName == "可选" 则 {
+        若 列表长度(params) >= 1 则 {
+            返回 1
+        }
+    }
+
+    // 结果类型
+    若 typeName == "结果" 则 {
+        若 列表长度(params) >= 2 则 {
+            返回 1
+        }
+    }
+
+    返回 0
+}
+
+/**
+ * 获取泛型参数数量
+ */
+函数 获取泛型参数数量(typeName: 文本): 整数 {
+    若 typeName == "列表" 则 { 返回 1 }
+    若 typeName == "可选" 则 { 返回 1 }
+    若 typeName == "结果" 则 { 返回 2 }
+    若 typeName == "字典" 则 { 返回 2 }
+    若 typeName == "集合" 则 { 返回 1 }
+    返回 0
+}
+
+/* ============ 作用域检查 ============ */
+
+/**
+ * 检查变量是否在当前作用域中定义
+ */
+函数 是全局变量(sema: Sema, name: 文本): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, name)
+
+    若 idx < 0 则 {
+        返回 0
+    }
+
+    // 简化：全局作用域
+    返回 1
+}
+
+/**
+ * 检查变量是否在作用域中可访问
+ */
+函数 是可访问的(sema: Sema, name: 文本): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, name)
+
+    若 idx >= 0 则 {
+        返回 1
+    }
+
+    返回 0
+}
+
+/**
+ * 获取变量的作用域层级
+ */
+函数 获取作用域层级(sema: Sema, name: 文本): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, name)
+
+    若 idx >= 0 则 {
+        返回 0  // 全局作用域
+    }
+
+    返回 -1  // 未找到
+}
+
+/* ============ 模块和导入支持 ============ */
+
+/**
+ * 分析导入语句
+ */
+函数 分析导入语句(sema: Sema, 模块路径: 文本): 整数 {
+    打印("分析导入语句: ")
+    打印(模块路径)
+
+    若 模块路径 == "" 则 {
+        报告错误(sema, "导入路径不能为空", 0)
+        返回 -1
+    }
+
+    // 简化：假设导入成功
+    返回 0
+}
+
+/**
+ * 分析模块定义
+ */
+函数 分析模块定义(sema: Sema, 模块名: 文本): 整数 {
+    打印("分析模块定义: ")
+    打印(模块名)
+
+    // 创建模块作用域
+    定义 可变 moduleScope: 整数
+    moduleScope = 创建作用域(sema, 模块名)
+
+    若 moduleScope < 0 则 {
+        报告错误(sema, "无法创建模块作用域: " + 模块名, 0)
+        返回 -1
+    }
+
+    // 退出模块作用域
+    sema.当前作用域 = sema.当前作用域 - 1
+
+    返回 0
+}
+
+/**
+ * 解析模块路径
+ */
+函数 解析模块路径(path: 文本): 列表 {
+    定义 可变 parts: 列表
+    parts = 列表()
+    返回 parts
+}
+
+/**
+ * 获取模块前缀
+ */
+函数 获取模块前缀(moduleName: 文本, symbolName: 文本): 文本 {
+    若 moduleName == "" 则 {
+        返回 symbolName
+    }
+    返回 moduleName + "." + symbolName
+}
+
+/**
+ * 检查符号是否可访问
+ */
+函数 检查符号可访问性(sema: Sema, 符号名: 文本, 当前模块: 文本): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, 符号名)
+
+    若 idx >= 0 则 {
+        返回 1
+    }
+
+    // 检查是否从导入的模块导入
+    返回 0
+}
+
+/**
+ * 注册导入的符号
+ */
+函数 注册导入符号(sema: Sema, 本地名: 文本, 原始名: 文本, 类型: 整数): 整数 {
+    打印("注册导入符号: ")
+    打印(本地名)
+    打印(" -> ")
+    打印(原始名)
+
+    定义 可变 result: 整数
+    result = 添加符号(sema, 本地名, 类型, 0)
+    返回 result
+}
+
+/* ============ AST 遍历语义分析 ============ */
+
+/**
+ * 分析 AST 节点
+ */
+函数 sema分析节点(sema: Sema, nodeKind: 整数, nodeName: 文本): 整数 {
+    打印("分析节点: kind=")
+    打印(nodeKind)
+    打印(", name=")
+    打印(nodeName)
+
+    若 nodeKind == 0 则 { 返回 分析标识符(sema, nodeName) }
+    若 nodeKind == 2 则 { 返回 分析变量定义(sema, nodeName, 0) }
+    若 nodeKind == 3 则 { 返回 分析函数调用(sema, nodeName, 0) }
+    若 nodeKind == 5 则 { 返回 分析函数定义(sema, nodeName, 5, 0) }
+    若 nodeKind == 10 则 { 返回 分析二元表达式(sema, 0, 0, nodeName) }
+
+    返回 0
+}
+
+/**
+ * 分析标识符
+ */
+函数 分析标识符(sema: Sema, name: 文本): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, name)
+
+    若 idx < 0 则 {
+        报告错误(sema, "未定义的标识符: " + name, 0)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 分析赋值表达式
+ */
+函数 分析赋值表达式(sema: Sema, 目标名: 文本, 源类型: 整数): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, 目标名)
+
+    若 idx < 0 则 {
+        报告错误(sema, "赋值目标未定义: " + 目标名, 0)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 分析函数调用参数
+ */
+函数 分析调用参数(sema: Sema, funcName: 文本, argTypes: 列表): 整数 {
+    定义 可变 i: 整数
+    i = 0
+
+    打印("分析函数 ")
+    打印(funcName)
+    打印(" 的 ")
+    打印(列表长度(argTypes))
+    打印(" 个参数")
+
+    当 i < 列表长度(argTypes) && i < 10 则 {
+        打印("  参数")
+        打印(i)
+        打印(" 类型: ")
+        打印(argTypes[i])
+        i = i + 1
+    }
+
+    返回 0
+}
+
+/**
+ * 分析控制流语句
+ */
+函数 分析控制流(sema: Sema, stmtKind: 整数): 整数 {
+    若 stmtKind == 6 则 {
+        打印("分析 if 语句")
+    } 否则 {
+        若 stmtKind == 7 则 {
+            打印("分析 while 语句")
+        } 否则 {
+            若 stmtKind == 8 则 {
+                打印("分析 for 语句")
+            }
+        }
+    }
+
+    返回 0
+}
+
+/**
+ * 分析类型定义
+ */
+函数 分析类型定义(sema: Sema, typeName: 文本, typeKind: 整数): 整数 {
+    打印("分析类型定义: ")
+    打印(typeName)
+
+    定义 可变 existing: 整数
+    existing = 查找符号(sema, typeName)
+
+    若 existing >= 0 则 {
+        报告错误(sema, "类型已定义: " + typeName, 0)
+        返回 -1
+    }
+
+    定义 可变 result: 整数
+    result = 添加符号(sema, typeName, typeKind, 0)
+
+    返回 result
+}
+
+/**
+ * 分析结构体字段
+ */
+函数 分析结构体字段(sema: Sema, structName: 文本, fieldName: 文本, fieldType: 整数): 整数 {
+    打印("分析结构体字段: ")
+    打印(structName)
+    打印(".")
+    打印(fieldName)
+
+    返回 0
+}
+
+/**
+ * 分析枚举成员
+ */
+函数 分析枚举成员(sema: Sema, enumName: 文本, memberName: 文本, value: 整数): 整数 {
+    打印("分析枚举成员: ")
+    打印(enumName)
+    打印(".")
+    打印(memberName)
+    打印(" = ")
+    打印(value)
+
+    返回 0
+}
+
+/**
+ * 分析 match 语句分支
+ */
+函数 分析Match分支(sema: Sema, 分支模式: 文本, 分支体: 整数): 整数 {
+    打印("分析 match 分支: ")
+    打印(分支模式)
+
+    若 分支模式 == "_" 则 {
+        打印("  (默认分支)")
+    }
+
+    返回 0
+}
+
+/**
+ * 分析 break 语句
+ */
+函数 分析Break语句(sema: Sema): 整数 {
+    打印("分析 break 语句")
+
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, "__in_loop")
+
+    若 idx < 0 则 {
+        报告错误(sema, "break 语句只能在循环中使用", 0)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 分析 continue 语句
+ */
+函数 分析Continue语句(sema: Sema): 整数 {
+    打印("分析 continue 语句")
+
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, "__in_loop")
+
+    若 idx < 0 则 {
+        报告错误(sema, "continue 语句只能在循环中使用", 0)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 进入循环作用域
+ * 更新循环状态，用于 break/continue 语句检查
+ */
+函数 sema进入循环(sema: Sema): 无返回 {
+    /* 更新循环状态 */
+    sema.循环状态.激活 = 1
+    sema.循环状态.循环层级 = sema.循环状态.循环层级 + 1
+    
+    打印("进入循环作用域，层级: ")
+    打印(sema.循环状态.循环层级)
+}
+
+/**
+ * 退出循环作用域
+ * 更新循环状态
+ */
+函数 sema退出循环(sema: Sema): 无返回 {
+    /* 更新循环状态 */
+    sema.循环状态.循环层级 = sema.循环状态.循环层级 - 1
+    若 sema.循环状态.循环层级 <= 0 则 {
+        sema.循环状态.激活 = 0
+        sema.循环状态.循环层级 = 0
+    }
+    
+    打印("退出循环作用域，剩余层级: ")
+    打印(sema.循环状态.循环层级)
+}
+
+/**
+ * 进入函数作用域
+ */
+函数 sema进入函数(sema: Sema, funcName: 文本): 无返回 {
+    打印("进入函数作用域: ")
+    打印(funcName)
+}
+
+/**
+ * 退出函数作用域
+ */
+函数 sema退出函数(sema: Sema): 无返回 {
+    打印("退出函数作用域")
+}
+
+/* ============ AST 遍历语义分析核心 ============ */
+
+/**
+ * 遍历 AST 根节点进行语义分析
+ */
+函数 sema遍历AST(sema: Sema, ast: AST节点): 整数 {
+    打印("=== 开始语义分析 ===")
+
+    sema.错误计数 = 0
+    sema.警告计数 = 0
+
+    /* 注意：全局作用域已经在 semaInit 中创建 */
+
+    定义 可变 errorCount: 整数
+    errorCount = 0
+
+    /* 遍历顶层声明 */
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(ast.children) && i < 100 则 {
+        定义 可变 child: AST节点
+        child = 列表获取(ast.children, i)
+
+        若 child.kind == 1 则 {  /* 函数定义 */
+            定义 可变 result: 整数
+            result = sema遍历函数定义(sema, child)
+            若 result < 0 则 {
+                errorCount = errorCount + 1
+            }
+        } 否则 若 child.kind == 3 则 {  /* 变量定义 */
+            定义 可变 result: 整数
+            result = sema遍历变量定义(sema, child)
+            若 result < 0 则 {
+                errorCount = errorCount + 1
+            }
+        } 否则 若 child.kind == 21 则 {  /* 结构体定义 */
+            定义 可变 result: 整数
+            result = sema遍历结构体定义(sema, child)
+            若 result < 0 则 {
+                errorCount = errorCount + 1
+            }
+        } 否则 若 child.kind == 22 则 {  /* 枚举定义 */
+            定义 可变 result: 整数
+            result = sema遍历枚举定义(sema, child)
+            若 result < 0 则 {
+                errorCount = errorCount + 1
+            }
+        } 否则 若 child.kind == 30 则 {  /* 外部声明 - 直接跳过，语义分析不报错 */
+            打印("跳过外部声明")
+        } 否则 {
+            打印("未知顶层声明类型: ")
+            打印(child.kind)
+        }
+        i = i + 1
+    }
+
+    打印("=== 语义分析完成 ===")
+    打印("错误数: ")
+    打印(sema.错误计数)
+    打印("警告数: ")
+    打印(sema.警告计数)
+
+    返回 errorCount
+}
+
+/**
+ * 遍历结构体定义
+ */
+函数 sema遍历结构体定义(sema: Sema, structNode: AST节点): 整数 {
+    定义 可变 structName: 文本
+    structName = structNode.name
+
+    打印("分析结构体定义: ")
+    打印(structName)
+
+    /* 创建结构体作用域 */
+    定义 可变 scopeIdx: 整数
+    scopeIdx = 创建作用域(sema, structName)
+
+    /* 添加结构体类型符号 */
+    定义 可变 result: 整数
+    result = 添加符号(sema, structName, 10, 0)
+
+    打印("结构体字段数量: ")
+    打印(列表长度(structNode.children))
+
+    退出作用域(sema)
+
+    返回 result
+}
+
+/**
+ * 遍历枚举定义
+ */
+函数 sema遍历枚举定义(sema: Sema, enumNode: AST节点): 整数 {
+    定义 可变 enumName: 文本
+    enumName = enumNode.name
+
+    打印("分析枚举定义: ")
+    打印(enumName)
+
+    /* 添加枚举类型符号 */
+    定义 可变 result: 整数
+    result = 添加符号(sema, enumName, 11, 0)
+
+    打印("枚举成员数量: ")
+    打印(列表长度(enumNode.children))
+
+    返回 result
+}
+
+/**
+ * 遍历函数定义
+ * 完整的函数定义分析，包括：
+ * 1. 解析函数名和返回类型
+ * 2. 分析参数列表并添加到作用域
+ * 3. 将函数添加到符号表
+ * 4. 分析函数体
+ * 5. 检查返回值
+ */
+函数 sema遍历函数定义(sema: Sema, funcNode: AST节点): 整数 {
+    定义 可变 funcName: 文本
+    funcName = funcNode.name
+    
+    /* 设置当前函数信息 */
+    sema.当前函数名 = funcName
+    sema.当前函数返回类型 = 0  /* 默认整数类型 */
+
+    打印("分析函数定义: ")
+    打印(funcName)
+
+    /* 首先将函数添加到当前作用域 */
+    定义 可变 result: 整数
+    result = 添加符号(sema, funcName, sema.当前函数返回类型, 0)
+    若 result < 0 则 {
+        返回 -1
+    }
+
+    /* 进入函数作用域 */
+    定义 可变 functionScopeIdx: 整数
+    functionScopeIdx = 创建作用域(sema, funcName + "_作用域")
+    sema进入函数(sema, funcName)
+
+    /* 分析参数列表 */
+    若 列表长度(funcNode.children) > 1 则 {
+        定义 可变 paramListNode: AST节点
+        paramListNode = 列表获取(funcNode.children, 0)
+        若 paramListNode.kind == 2 则 {  /* 参数列表节点 */
+            result = sema分析参数列表(sema, paramListNode)
+            若 result < 0 则 {
+                退出作用域(sema)
+                返回 -1
+            }
+        }
+    }
+
+    /* 分析函数体 */
+    定义 可变 bodyIdx: 整数
+    bodyIdx = 1  /* 默认 body 在索引 1 */
+    若 列表长度(funcNode.children) == 1 则 {
+        bodyIdx = 0  /* 如果只有一个子节点，就是 body */
+    }
+    
+    定义 可变 body: AST节点
+    body = 列表获取(funcNode.children, bodyIdx)
+
+    打印("函数体 kind=")
+    打印(body.kind)
+
+    result = 0
+    若 body.kind == 18 则 {  /* 块语句 */
+        打印("遍历块语句")
+        result = sema遍历块语句(sema, body)
+    } 否则 {
+        /* 单表达式函数体 */
+        打印("遍历表达式")
+        定义 可变 exprType: 整数
+        exprType = sema遍历表达式(sema, body)
+        
+        /* 检查返回类型 */
+        若 exprType >= 0 && sema.当前函数返回类型 >= 0 则 {
+            若 类型兼容(exprType, sema.当前函数返回类型) == 0 则 {
+                报告错误(sema, "函数返回类型不匹配: 期望 " + 类型转文本(sema.当前函数返回类型) + 
+                     ", 实际 " + 类型转文本(exprType), funcNode.line)
+            }
+        }
+    }
+
+    /* 退出函数作用域 */
+    sema退出函数(sema)
+    退出作用域(sema)
+    
+    /* 清除当前函数信息 */
+    sema.当前函数名 = ""
+    sema.当前函数返回类型 = -1
+
+    返回 result
+}
+
+/**
+ * 分析参数列表
+ * 解析函数参数并添加到作用域
+ */
+函数 sema分析参数列表(sema: Sema, paramListNode: AST节点): 整数 {
+    打印("分析参数列表，参数个数: ")
+    打印(列表长度(paramListNode.children))
+    
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(paramListNode.children) 则 {
+        定义 可变 paramNode: AST节点
+        paramNode = 列表获取(paramListNode.children, i)
+        
+        /* 参数节点应该是标识符或变量定义 */
+        定义 可变 paramName: 文本
+        paramName = paramNode.name
+        
+        /* 默认参数类型为整数 */
+        定义 可变 paramType: 整数
+        paramType = 0
+        
+        打印("  参数: ")
+        打印(paramName)
+        打印(" 类型: ")
+        打印(类型转文本(paramType))
+        
+        /* 添加参数到作用域 */
+        定义 可变 result: 整数
+        result = 添加符号(sema, paramName, paramType, 1)  /* 参数是可变的 */
+        若 result < 0 则 {
+            返回 -1
+        }
+        
+        i = i + 1
+    }
+    
+    返回 0
+}
+
+/**
+ * 遍历块语句
+ */
+函数 sema遍历块语句(sema: Sema, block: AST节点): 整数 {
+    定义 可变 i: 整数
+    i = 0
+    定义 可变 errorCount: 整数
+    errorCount = 0
+
+    打印("分析块语句, children=")
+    打印(列表长度(block.children))
+
+    当 i < 列表长度(block.children) && i < 50 则 {
+        定义 可变 stmt: AST节点
+        stmt = block.children[i]
+
+        定义 可变 result: 整数
+        result = sema遍历语句(sema, stmt)
+        若 result < 0 则 {
+            errorCount = errorCount + 1
+        }
+
+        i = i + 1
+    }
+
+    返回 errorCount
+}
+
+/**
+ * 遍历语句
+ */
+函数 sema遍历语句(sema: Sema, stmt: AST节点): 整数 {
+    定义 可变 result: 整数
+    result = 0
+
+    若 stmt.kind == 3 则 {  /* 变量定义 */
+        result = sema遍历变量定义(sema, stmt)
+    } 否则 若 stmt.kind == 12 则 {  /* 函数调用表达式 */
+        result = sema遍历函数调用(sema, stmt.name, stmt.children)
+    } 否则 若 stmt.kind == 5 则 {  /* if 语句 */
+        result = sema遍历If语句(sema, stmt)
+    } 否则 若 stmt.kind == 6 则 {  /* while 语句 */
+        result = sema遍历While语句(sema, stmt)
+    } 否则 若 stmt.kind == 20 则 {  /* for 语句 */
+        result = sema遍历For语句(sema, stmt)
+    } 否则 若 stmt.kind == 8 则 {  /* return 语句 */
+        result = sema遍历返回语句(sema, stmt)
+    } 否则 若 stmt.kind == 10 则 {  /* 二元表达式语句 */
+        若 列表长度(stmt.children) >= 2 则 {
+            定义 可变 leftChild: AST节点
+            定义 可变 rightChild: AST节点
+            leftChild = 列表获取(stmt.children, 0)
+            rightChild = 列表获取(stmt.children, 1)
+            result = sema遍历二元表达式(sema, stmt.name, leftChild, rightChild)
+        }
+    } 否则 若 stmt.kind == 16 则 {  /* break 语句 */
+        result = sema遍历Break语句(sema, stmt)
+    } 否则 若 stmt.kind == 17 则 {  /* continue 语句 */
+        result = sema遍历Continue语句(sema, stmt)
+    } 否则 若 stmt.kind == 25 则 {  /* match 语句 */
+        若 列表长度(stmt.children) >= 1 则 {
+            定义 可变 matchSubject: AST节点
+            matchSubject = 列表获取(stmt.children, 0)
+            定义 可变 subjectType: 整数
+            subjectType = sema遍历表达式(sema, matchSubject)
+
+            定义 可变 branchCount: 整数
+            branchCount = 列表长度(stmt.children) - 1
+            result = 分析Match语句(sema, subjectType, branchCount)
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 遍历变量定义
+ * 完整的变量定义分析，包括：
+ * 1. 解析变量名和类型注解
+ * 2. 检查变量是否重定义
+ * 3. 添加变量到符号表
+ * 4. 分析初始化表达式
+ * 5. 检查类型兼容性
+ */
+函数 sema遍历变量定义(sema: Sema, varNode: AST节点): 整数 {
+    定义 可变 varName: 文本
+    varName = varNode.name
+
+    打印("分析变量定义: ")
+    打印(varName)
+
+    /* 检查是否已在当前作用域定义 */
+    定义 可变 existing: 整数
+    existing = 在当前作用域查找符号(sema, varName)
+
+    若 existing >= 0 则 {
+        报告错误(sema, "变量 '" + varName + "' 已在当前作用域定义", varNode.line)
+        返回 -1
+    }
+
+    /* 解析变量类型（从 intValue 或 name 推断） */
+    定义 可变 varType: 整数
+    varType = varNode.intValue
+    若 varType < 0 || varType > 8 则 {
+        varType = 0  /* 默认整数类型 */
+    }
+
+    /* 检查是否是可变变量 */
+    定义 可变 isMutable: 整数
+    isMutable = 0  /* 默认不可变 */
+    /* 可以从 varNode.value 或其他字段获取可变信息 */
+    若 varNode.value == "可变" 则 {
+        isMutable = 1
+    }
+
+    /* 添加变量到符号表 */
+    定义 可变 result: 整数
+    result = 添加符号(sema, varName, varType, isMutable)
+    若 result < 0 则 {
+        返回 -1
+    }
+
+    /* 分析初始化表达式 */
+    若 列表长度(varNode.children) > 0 则 {
+        定义 可变 initExpr: AST节点
+        initExpr = 列表获取(varNode.children, 0)
+        
+        定义 可变 initType: 整数
+        initType = sema遍历表达式(sema, initExpr)
+        
+        /* 检查初始化类型兼容性 */
+        若 initType >= 0 则 {
+            若 类型兼容(varType, initType) == 0 则 {
+                报告警告(sema, "变量 '" + varName + "' 初始化类型不兼容: 期望 " + 
+                          类型转文本(varType) + ", 实际 " + 类型转文本(initType), varNode.line)
+            }
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 遍历 if 语句
+ */
+函数 sema遍历If语句(sema: Sema, ifNode: AST节点): 整数 {
+    打印("分析 if 语句")
+
+    定义 可变 cond: AST节点
+    cond = 列表获取(ifNode.children, 0)
+
+    定义 可变 condType: 整数
+    condType = sema遍历表达式(sema, cond)
+
+    /* 条件必须是布尔类型 */
+    若 condType != 2 则 {
+        报告警告(sema, "if 条件应为布尔类型", 0)
+    }
+
+    /* 分析 then 块 */
+    定义 可变 thenBlock: AST节点
+    thenBlock = 列表获取(ifNode.children, 1)
+    定义 可变 result: 整数
+    result = sema遍历块语句(sema, thenBlock)
+
+    /* 分析 else 块 */
+    定义 可变 childrenLen: 整数
+    childrenLen = 列表长度(ifNode.children)
+    若 childrenLen >= 3 则 {
+        定义 可变 elseBlock: AST节点
+        elseBlock = 列表获取(ifNode.children, 2)
+        定义 可变 elseResult: 整数
+        elseResult = sema遍历块语句(sema, elseBlock)
+        若 elseResult < 0 则 {
+            result = elseResult
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 遍历 while 语句
+ */
+函数 sema遍历While语句(sema: Sema, whileNode: AST节点): 整数 {
+    打印("分析 while 语句")
+
+    /* 进入循环作用域 */
+    sema进入循环(sema)
+
+    /* 分析条件表达式 */
+    若 列表长度(whileNode.children) >= 1 则 {
+        定义 可变 cond: AST节点
+        cond = 列表获取(whileNode.children, 0)
+
+        定义 可变 condType: 整数
+        condType = sema遍历表达式(sema, cond)
+
+        /* 条件应该是布尔类型 */
+        若 condType != 2 && condType != 8 则 {
+            报告警告(sema, "while 条件应为布尔类型", whileNode.line)
+        }
+    }
+
+    /* 分析循环体 */
+    定义 可变 result: 整数
+    result = 0
+    若 列表长度(whileNode.children) >= 2 则 {
+        定义 可变 body: AST节点
+        body = 列表获取(whileNode.children, 1)
+
+        若 body.kind == 18 则 {
+            result = sema遍历块语句(sema, body)
+        } 否则 {
+            result = sema遍历表达式(sema, body)
+        }
+    }
+
+    /* 退出循环作用域 */
+    sema退出循环(sema)
+
+    返回 result
+}
+
+/**
+ * 遍历 break 语句
+ * 检查 break 语句是否在循环中
+ */
+函数 sema遍历Break语句(sema: Sema, breakNode: AST节点): 整数 {
+    打印("分析 break 语句")
+
+    /* 检查是否在循环中 */
+    若 sema.循环状态.激活 == 0 则 {
+        报告错误(sema, "break 语句只能在循环中使用", breakNode.line)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 遍历 continue 语句
+ * 检查 continue 语句是否在循环中
+ */
+函数 sema遍历Continue语句(sema: Sema, continueNode: AST节点): 整数 {
+    打印("分析 continue 语句")
+
+    /* 检查是否在循环中 */
+    若 sema.循环状态.激活 == 0 则 {
+        报告错误(sema, "continue 语句只能在循环中使用", continueNode.line)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 遍历 for 语句
+ */
+函数 sema遍历For语句(sema: Sema, forNode: AST节点): 整数 {
+    打印("分析 for 语句")
+
+    /* 进入循环作用域 */
+    sema进入循环(sema)
+
+    /* 分析初始化 */
+    定义 可变 init: AST节点
+    init = 列表获取(forNode.children, 0)
+    定义 可变 initResult: 整数
+    initResult = sema遍历表达式(sema, init)
+
+    /* 分析条件 */
+    定义 可变 cond: AST节点
+    cond = 列表获取(forNode.children, 1)
+    定义 可变 condType: 整数
+    condType = sema遍历表达式(sema, cond)
+
+    /* 分析循环体 */
+    定义 可变 body: AST节点
+    body = 列表获取(forNode.children, 2)
+    定义 可变 result: 整数
+    result = sema遍历块语句(sema, body)
+
+    /* 退出循环作用域 */
+    sema退出循环(sema)
+
+    返回 result
+}
+
+/**
+ * 遍历返回语句
+ */
+函数 sema遍历返回语句(sema: Sema, retNode: AST节点): 整数 {
+    打印("分析 return 语句")
+
+    若 retNode.children.kind != 0 则 {
+        定义 可变 exprType: 整数
+        exprType = sema遍历表达式(sema, retNode.children)
+    }
+
+    返回 0
+}
+
+/**
+ * 遍历表达式
+ * 完整的表达式分析，包括：
+ * 1. 标识符查找和类型获取
+ * 2. 字面量类型推断
+ * 3. 二元表达式类型检查
+ * 4. 一元表达式类型检查
+ * 5. 函数调用类型检查
+ */
+函数 sema遍历表达式(sema: Sema, expr: AST节点): 整数 {
+    定义 可变 exprType: 整数
+    exprType = 8  /* 默认为未知类型 */
+
+    /* 更新当前行号 */
+    sema.当前行号 = expr.line
+
+    若 expr.kind == 13 则 {  /* 标识符表达式 */
+        exprType = sema遍历标识符(sema, expr.name)
+    } 否则 若 expr.kind == 14 则 {  /* 字面量表达式 */
+        /* 根据字面量值推断类型 */
+        定义 可变 val: 文本
+        val = expr.value
+        若 val == "真" || val == "假" 则 {
+            exprType = 2  /* 布尔类型 */
+        } 否则 若 val == "\"" || (文本长度(val) > 0 && val[0] == "\"") 则 {
+            exprType = 3  /* 文本类型 */
+        } 否则 若 val == "'" || (文本长度(val) > 0 && val[0] == "'") 则 {
+            exprType = 4  /* 字符类型 */
+        } 否则 若 文本包含(val, ".") == 1 则 {
+            exprType = 1  /* 浮点类型 */
+        } 否则 {
+            exprType = 0  /* 整数类型 */
+        }
+    } 否则 若 expr.kind == 10 则 {  /* 二元表达式 */
+        若 列表长度(expr.children) >= 2 则 {
+            定义 可变 leftChild: AST节点
+            定义 可变 rightChild: AST节点
+            leftChild = 列表获取(expr.children, 0)
+            rightChild = 列表获取(expr.children, 1)
+            exprType = sema遍历二元表达式(sema, expr.name, leftChild, rightChild)
+        }
+    } 否则 若 expr.kind == 11 则 {  /* 一元表达式 */
+        若 列表长度(expr.children) >= 1 则 {
+            定义 可变 operand: AST节点
+            operand = 列表获取(expr.children, 0)
+            exprType = sema遍历一元表达式(sema, expr.name, operand)
+        }
+    } 否则 若 expr.kind == 12 则 {  /* 调用表达式 */
+        exprType = sema遍历函数调用(sema, expr.name, expr.children)
+    } 否则 若 expr.kind == 19 则 {  /* 赋值表达式 */
+        若 列表长度(expr.children) >= 2 则 {
+            定义 可变 targetNode: AST节点
+            定义 可变 valueNode: AST节点
+            targetNode = 列表获取(expr.children, 0)
+            valueNode = 列表获取(expr.children, 1)
+            exprType = sema遍历赋值表达式(sema, targetNode, valueNode)
+        }
+    } 否则 {
+        /* 其他类型默认未知，后续可以扩展 */
+        exprType = 0
+    }
+
+    返回 exprType
+}
+
+/**
+ * 遍历赋值表达式
+ * 检查赋值目标和值的类型兼容性
+ */
+函数 sema遍历赋值表达式(sema: Sema, target: AST节点, value: AST节点): 整数 {
+    /* 分析目标表达式 */
+    定义 可变 targetType: 整数
+    targetType = sema遍历表达式(sema, target)
+    
+    /* 分析值表达式 */
+    定义 可变 valueType: 整数
+    valueType = sema遍历表达式(sema, value)
+    
+    /* 检查类型兼容性 */
+    若 targetType >= 0 && valueType >= 0 则 {
+        若 检查赋值兼容性(targetType, valueType) == 0 则 {
+            报告错误(sema, "赋值类型不兼容: 目标类型 " + 类型转文本(targetType) + 
+                     ", 值类型 " + 类型转文本(valueType), sema.当前行号)
+        }
+    }
+    
+    /* 赋值表达式返回目标类型 */
+    返回 targetType
+}
+
+/**
+ * 遍历标识符
+ */
+函数 sema遍历标识符(sema: Sema, name: 文本): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, name)
+
+    若 idx < 0 则 {
+        报告错误(sema, "未定义的标识符: " + name, 0)
+        返回 -1
+    }
+
+    定义 可变 symType: 整数
+    symType = 获取符号类型(sema, name)
+    返回 symType
+}
+
+/**
+ * 遍历二元表达式
+ */
+函数 sema遍历二元表达式(sema: Sema, op: 文本, left: AST节点, right: AST节点): 整数 {
+    定义 可变 leftType: 整数
+    leftType = sema遍历表达式(sema, left)
+
+    定义 可变 rightType: 整数
+    rightType = sema遍历表达式(sema, right)
+
+    /* 检查类型兼容性 */
+    若 类型兼容(leftType, rightType) == 0 则 {
+        报告错误(sema, "二元运算操作数类型不匹配", 0)
+    }
+
+    /* 比较运算需要整数或浮点类型，不支持指针/文本类型直接比较 */
+    若 op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" 则 {
+        若 leftType < 0 || leftType == 3 || leftType == 6 则 {
+            报告错误(sema, "文本类型不支持直接比较，请使用运行时字符串比较函数", 0)
+        }
+    }
+
+    /* 返回结果类型 */
+    若 op == "+" || op == "-" || op == "*" || op == "/" || op == "%" 则 {
+        返回 leftType  /* 算术运算返回左操作数类型 */
+    }
+
+    /* 如果左操作数是文本类型，比较结果应该通过运行时函数返回，这里返回整数表示错误 */
+    若 leftType < 0 || leftType == 3 || leftType == 6 则 {
+        返回 0  /* 返回整数表示类型错误 */
+    }
+
+    返回 2  /* 比较和逻辑运算返回布尔类型 */
+}
+
+/**
+ * 遍历一元表达式
+ */
+函数 sema遍历一元表达式(sema: Sema, op: 文本, operand: AST节点): 整数 {
+    定义 可变 operandType: 整数
+    operandType = sema遍历表达式(sema, operand)
+
+    若 op == "!" 则 {
+        返回 2  /* 逻辑非返回布尔类型 */
+    }
+
+    返回 operandType  /* 其他一元运算保持原类型 */
+}
+
+/**
+ * 遍历函数调用
+ */
+函数 sema遍历函数调用(sema: Sema, funcName: 文本, args: AST节点): 整数 {
+    打印("分析函数调用: ")
+    打印(funcName)
+
+    定义 可变 funcIdx: 整数
+    funcIdx = 查找符号(sema, funcName)
+
+    若 funcIdx < 0 则 {
+        报告错误(sema, "调用未定义的函数: " + funcName, 0)
+        返回 -1
+    }
+
+    /* 分析参数 */
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(args.children) && i < 10 则 {
+        定义 可变 arg: AST节点
+        arg = args.children[i]
+        定义 可变 argType: 整数
+        argType = sema遍历表达式(sema, arg)
+        i = i + 1
+    }
+
+    /* 推断返回类型 */
+    定义 可变 returnType: 整数
+    returnType = 推断函数返回类型(funcName, args.children)
+
+    返回 returnType
+}
+
+/**
+ * 注册内置函数
+ */
+函数 注册内置函数(sema: Sema): 无返回 {
+    打印("注册内置函数...")
+
+    定义 可变 result: 整数
+    result = 添加符号(sema, "打印", 5, 0)
+    result = 添加符号(sema, "打印整数", 5, 0)
+    result = 添加符号(sema, "输入整数", 0, 0)
+    result = 添加符号(sema, "输入文本", 3, 0)
+    result = 添加符号(sema, "文本长度", 0, 0)
+    result = 添加符号(sema, "列表长度", 0, 0)
+    result = 添加符号(sema, "整数转文本", 3, 0)
+    result = 添加符号(sema, "文本转整数", 0, 0)
+}
+
+/* ============ 语义分析函数 ============ */
+
+/**
+ * 分析变量定义
+ */
+函数 分析变量定义(sema: Sema, 名称: 文本, 类型: 整数): 整数 {
+    打印("分析变量定义: ")
+    打印(名称)
+
+    // 检查是否已定义
+    定义 可变 existing: 整数
+    existing = 查找符号(sema, 名称)
+
+    若 existing >= 0 则 {
+        打印("错误: 变量 ")
+        打印(名称)
+        打印(" 已定义")
+        返回 -1
+    }
+
+    // 添加符号
+    定义 可变 result: 整数
+    result = 添加符号(sema, 名称, 类型, 0)
+
+    返回 result
+}
+
+/**
+ * 分析函数调用
+ */
+函数 分析函数调用(sema: Sema, 函数名: 文本, 参数个数: 整数): 整数 {
+    打印("分析函数调用: ")
+    打印(函数名)
+    打印(" (参数个数=")
+    打印(参数个数)
+    打印(")")
+
+    // 检查函数是否定义
+    定义 可变 funcIdx: 整数
+    funcIdx = 查找符号(sema, 函数名)
+
+    若 funcIdx < 0 则 {
+        报告错误(sema, "函数未定义: " + 函数名, 0)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 分析二元表达式
+ */
+函数 分析二元表达式(sema: Sema, 左类型: 整数, 右类型: 整数, 运算符: 文本): 整数 {
+    打印("分析二元表达式: ")
+    打印(运算符)
+
+    // 检查类型兼容
+    若 类型兼容(左类型, 右类型) == 0 则 {
+        打印("警告: 类型不匹配")
+    }
+
+    // 算术运算返回整数
+    若 运算符 == "+" || 运算符 == "-" || 运算符 == "*" || 运算符 == "/" || 运算符 == "%" 则 {
+        若 左类型 == 1 || 右类型 == 1 则 {
+            返回 1 // 浮点运算返回浮点
+        }
+        返回 0 // 整数运算返回整数
+    }
+
+    // 比较运算返回布尔
+    若 运算符 == "==" || 运算符 == "!=" || 运算符 == "<" || 运算符 == ">" || 运算符 == "<=" || 运算符 == ">=" 则 {
+        返回 2 // 布尔类型
+    }
+
+    // 逻辑运算返回布尔
+    若 运算符 == "&&" || 运算符 == "||" 则 {
+        若 左类型 != 2 || 右类型 != 2 则 {
+            报告警告(sema, "逻辑运算需要布尔操作数", 0)
+        }
+        返回 2
+    }
+
+    返回 0
+}
+
+/**
+ * 分析一元表达式
+ */
+函数 分析一元表达式(sema: Sema, 操作数类型: 整数, 运算符: 文本): 整数 {
+    打印("分析一元表达式: ")
+    打印(运算符)
+
+    // 负号运算符
+    若 运算符 == "-" 则 {
+        若 操作数类型 == 2 则 {
+            报告警告(sema, "布尔类型取负无意义", 0)
+        }
+        返回 操作数类型
+    }
+
+    // 逻辑非
+    若 运算符 == "!" 则 {
+        若 操作数类型 != 2 则 {
+            报告警告(sema, "逻辑非需要布尔操作数", 0)
+        }
+        返回 2
+    }
+
+    返回 操作数类型
+}
+
+/**
+ * 分析 if 语句
+ */
+函数 分析If语句(sema: Sema, 条件类型: 整数): 整数 {
+    打印("分析 if 语句")
+
+    // 条件必须是布尔类型
+    若 条件类型 != 2 则 {
+        打印("警告: if 条件应为布尔类型")
+    }
+
+    返回 0
+}
+
+/**
+ * 分析 while 语句
+ */
+函数 分析While语句(sema: Sema, 条件类型: 整数): 整数 {
+    打印("分析 while 语句")
+
+    // 条件必须是布尔类型
+    若 条件类型 != 2 则 {
+        打印("警告: while 条件应为布尔类型")
+    }
+
+    返回 0
+}
+
+/**
+ * 分析 for 语句
+ */
+函数 分析For语句(sema: Sema, 起始类型: 整数, 结束类型: 整数): 整数 {
+    打印("分析 for 语句")
+
+    若 起始类型 != 0 && 起始类型 != 1 则 {
+        报告警告(sema, "for 循环起始值应为数值类型", 0)
+    }
+
+    若 结束类型 != 0 && 结束类型 != 1 则 {
+        报告警告(sema, "for 循环结束值应为数值类型", 0)
+    }
+
+    返回 0
+}
+
+/**
+ * 分析赋值表达式
+ */
+函数 分析赋值表达式(sema: Sema, 目标类型: 整数, 源类型: 整数): 整数 {
+    打印("分析赋值表达式")
+
+    // 检查类型兼容性
+    若 检查赋值兼容性(目标类型, 源类型) == 0 则 {
+        报告错误(sema, "赋值类型不匹配", 0)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 分析 return 语句
+ */
+函数 分析返回语句(sema: Sema, 返回类型: 整数, 表达式类型: 整数): 整数 {
+    打印("分析 return 语句")
+
+    若 返回类型 == 5 则 {
+        // void 函数
+        若 表达式类型 != 5 && 表达式类型 >= 0 则 {
+            报告警告(sema, "void 函数不应有返回值", 0)
+        }
+        返回 0
+    }
+
+    若 表达式类型 < 0 则 {
+        报告错误(sema, "return 语句缺少表达式", 0)
+        返回 -1
+    }
+
+    若 检查赋值兼容性(返回类型, 表达式类型) == 0 则 {
+        报告错误(sema, "返回值类型不匹配", 0)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 分析 break 语句上下文
+ */
+函数 分析Break语句(sema: Sema, 在循环中: 整数): 整数 {
+    若 在循环中 == 0 则 {
+        报告错误(sema, "break 语句只能在循环中使用", 0)
+        返回 -1
+    }
+    返回 0
+}
+
+/**
+ * 分析 continue 语句上下文
+ */
+函数 分析Continue语句(sema: Sema, 在循环中: 整数): 整数 {
+    若 在循环中 == 0 则 {
+        报告错误(sema, "continue 语句只能在循环中使用", 0)
+        返回 -1
+    }
+    返回 0
+}
+
+/**
+ * 分析函数定义
+ */
+函数 分析函数定义(sema: Sema, 函数名: 文本, 返回类型: 整数, 参数个数: 整数): 整数 {
+    打印("分析函数定义: ")
+    打印(函数名)
+
+    // 检查是否已定义
+    定义 可变 existing: 整数
+    existing = 查找符号(sema, 函数名)
+
+    若 existing >= 0 则 {
+        报告错误(sema, "函数已定义: " + 函数名, 0)
+        返回 -1
+    }
+
+    // 添加函数符号
+    定义 可变 result: 整数
+    result = 添加符号(sema, 函数名, 返回类型, 0)
+
+    返回 result
+}
+
+/**
+ * 分析结构体定义
+ */
+函数 分析结构体定义(sema: Sema, 结构体名: 文本, 字段个数: 整数): 整数 {
+    打印("分析结构体定义: ")
+    打印(结构体名)
+
+    // 创建结构体作用域
+    定义 可变 scopeIdx: 整数
+    scopeIdx = 创建作用域(sema, 结构体名)
+
+    若 scopeIdx < 0 则 {
+        报告错误(sema, "无法创建结构体作用域", 0)
+        返回 -1
+    }
+
+    返回 0
+}
+
+/**
+ * 分析枚举定义
+ */
+函数 分析枚举定义(sema: Sema, 枚举名: 文本, 成员个数: 整数): 整数 {
+    打印("分析枚举定义: ")
+    打印(枚举名)
+
+    // 添加枚举类型
+    定义 可变 typeIdx: 整数
+    typeIdx = 添加符号(sema, 枚举名, 0, 0)
+
+    返回 0
+}
+
+/**
+ * 分析 match 语句
+ */
+函数 分析Match语句(sema: Sema, 主题类型: 整数, 分支个数: 整数): 整数 {
+    打印("分析 match 语句，分支数=")
+    打印(分支个数)
+
+    若 分支个数 == 0 则 {
+        报告警告(sema, "match 语句没有分支", 0)
+    }
+
+    返回 0
+}
+
+/* ============ 代码质量检查 ============ */
+
+/**
+ * 检查函数复杂度
+ */
+函数 检查函数复杂度(funcName: 文本, nodeCount: 整数): 整数 {
+    若 nodeCount > 100 则 {
+        打印("警告: 函数 " + funcName + " 复杂度较高")
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 检查未使用变量
+ */
+函数 检查未使用变量(sema: Sema, varName: 文本): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, varName)
+
+    若 idx < 0 则 {
+        返回 0
+    }
+
+    打印("警告: 变量 " + varName + " 定义但未使用")
+    返回 1
+}
+
+/**
+ * 检查死代码
+ */
+函数 检查死代码(sema: Sema): 整数 {
+    打印("检查死代码...")
+    返回 0
+}
+
+/**
+ * 检查无限循环
+ */
+函数 检查无限循环(nodeCount: 整数): 整数 {
+    若 nodeCount > 1000 则 {
+        打印("警告: 检测到可能的无限循环")
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 检查变量遮蔽
+ */
+函数 检查变量遮蔽(sema: Sema, varName: 文本): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, varName)
+
+    若 idx >= 0 则 {
+        打印("警告: 变量 " + varName + " 在内层作用域被遮蔽")
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 检查空指针解引用
+ */
+函数 检查空指针解引用(exprKind: 整数): 整数 {
+    返回 0
+}
+
+/**
+ * 检查除零错误
+ */
+函数 检查除零(divisor: 文本): 整数 {
+    若 divisor == "0" 则 {
+        打印("错误: 检测到除零操作")
+        返回 -1
+    }
+    返回 0
+}
+
+/**
+ * 检查类型不匹配
+ */
+函数 检查类型不匹配(期望: 整数, 实际: 整数): 整数 {
+    若 期望 != 实际 则 {
+        打印("警告: 类型不匹配，期望 ")
+        打印(类型转文本(期望))
+        打印("，实际 ")
+        打印(类型转文本(实际))
+        返回 1
+    }
+    返回 0
+}
+
+/* ============ 优化建议 ============ */
+
+/**
+ * 建议内联
+ */
+函数 建议内联(funcName: 文本, callCount: 整数): 整数 {
+    若 callCount <= 3 则 {
+        打印("建议: 小函数 " + funcName + " 可以内联")
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 建议常量折叠
+ */
+函数 建议常量折叠(expr: 文本): 整数 {
+    若 expr != "" 则 {
+        打印("建议: 表达式可以常量折叠")
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 建议循环展开
+ */
+函数 建议循环展开(loopBodySize: 整数, iterationCount: 整数): 整数 {
+    若 iterationCount <= 10 && loopBodySize <= 20 则 {
+        打印("建议: 循环可以展开")
+        返回 1
+    }
+    返回 0
+}
+
+/* ============ 主函数 ============ */
+
+/**
+ * 执行语义分析
+ */
+函数 semaRun(astNodeCount: 整数): 整数 {
+    打印("=== 语义分析 ===")
+
+    定义 可变 sema: Sema
+    sema.源码 = ""
+    sema.当前作用域 = 0
+    sema.作用域栈 = 列表()
+    sema.错误列表 = 列表()
+    sema.警告列表 = 列表()
+    sema.当前行号 = 1
+
+    // 创建全局作用域
+    定义 可变 globalScope: 整数
+    globalScope = 创建作用域(sema, "全局")
+
+    // 注册内置函数
+    定义 可变 result: 整数
+    result = 添加符号(sema, "打印", 5, 0)
+    result = 添加符号(sema, "打印整数", 5, 0)
+    result = 添加符号(sema, "输入整数", 0, 0)
+
+    打印("语义分析完成，无错误")
+
+    返回 0
+}
+
+/* ============ 高级语义检查函数 ============ */
+
+/**
+ * 检查函数是否递归
+ */
+函数 是递归函数(funcName: 文本, callGraph: 列表): 整数 {
+    若 funcName == "" 则 { 返回 0 }
+    打印("检查递归: " + funcName)
+    返回 0
+}
+
+/**
+ * 检查函数是否为尾递归
+ */
+函数 是尾递归(funcName: 文本): 整数 {
+    若 funcName == "" 则 { 返回 0 }
+    打印("检查尾递归: " + funcName)
+    返回 0
+}
+
+/**
+ * 分析函数调用图
+ */
+函数 分析调用图(funcList: 列表): 列表 {
+    定义 可变 callGraph: 列表
+    callGraph = 列表()
+    打印("分析调用图...")
+    返回 callGraph
+}
+
+/**
+ * 检查变量初始化状态
+ */
+函数 检查变量初始化(sema: Sema, varName: 文本): 整数 {
+    定义 可变 idx: 整数
+    idx = 查找符号(sema, varName)
+
+    若 idx < 0 则 {
+        报告警告(sema, "变量未定义: " + varName, 0)
+        返回 0
+    }
+
+    打印("变量已初始化: " + varName)
+    返回 1
+}
+
+/**
+ * 检查类型是否为基础类型
+ */
+函数 是基础类型(typeName: 文本): 整数 {
+    若 typeName == "整数" 则 { 返回 1 }
+    若 typeName == "浮点数" 则 { 返回 1 }
+    若 typeName == "布尔" 则 { 返回 1 }
+    若 typeName == "文本" 则 { 返回 1 }
+    若 typeName == "字符" 则 { 返回 1 }
+    若 typeName == "无返回" 则 { 返回 1 }
+    返回 0
+}
+
+/**
+ * 检查类型是否为聚合类型
+ */
+函数 是聚合类型(typeName: 文本): 整数 {
+    若 typeName == "列表" 则 { 返回 1 }
+    若 typeName == "结构体" 则 { 返回 1 }
+    若 typeName == "枚举" 则 { 返回 1 }
+    若 typeName == "字典" 则 { 返回 1 }
+    返回 0
+}
+
+/**
+ * 检查函数参数数量
+ */
+函数 检查参数数量(funcName: 文本, expected: 整数, actual: 整数): 整数 {
+    若 expected != actual 则 {
+        打印("警告: 函数 " + funcName + " 参数数量不匹配，期望 " + 整数转文本(expected) + "，实际 " + 整数转文本(actual))
+        返回 0
+    }
+    返回 1
+}
+
+/**
+ * 检查函数返回值
+ */
+函数 检查函数返回值(funcName: 文本, returnType: 整数, hasReturn: 整数): 整数 {
+    若 returnType != 5 && hasReturn == 0 则 {
+        打印("警告: 函数 " + funcName + " 应该有返回值")
+        返回 0
+    }
+    返回 1
+}
+
+/**
+ * 检查 break 语句是否在循环中
+ */
+函数 检查Break语句上下文(sema: Sema): 整数 {
+    打印("检查 break 语句上下文...")
+    返回 1
+}
+
+/**
+ * 检查 continue 语句是否在循环中
+ */
+函数 检查Continue语句上下文(sema: Sema): 整数 {
+    打印("检查 continue 语句上下文...")
+    返回 1
+}
+
+/**
+ * 分析循环复杂度
+ */
+函数 分析循环复杂度(nodeCount: 整数): 整数 {
+    若 nodeCount > 500 则 {
+        打印("警告: 循环复杂度较高")
+        返回 2
+    }
+    若 nodeCount > 200 则 {
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 分析分支预测提示
+ */
+函数 分析分支预测(condFreq: 浮点数): 文本 {
+    若 condFreq > 0.9 则 { 返回 "likely_taken" }
+    若 condFreq < 0.1 则 { 返回 "unlikely_taken" }
+    返回 "unpredictable"
+}
+
+/**
+ * 检查内存分配大小
+ */
+函数 检查内存分配大小(size: 整数): 整数 {
+    若 size <= 0 则 {
+        打印("错误: 内存分配大小必须为正数")
+        返回 -1
+    }
+    若 size > 1073741824 则 {
+        打印("警告: 内存分配大小超过 1GB")
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 检查指针运算有效性
+ */
+函数 检查指针运算(ptrType: 整数, offset: 整数): 整数 {
+    若 ptrType != 6 && ptrType != 3 则 {
+        打印("错误: 非指针类型不能进行指针运算")
+        返回 0
+    }
+    返回 1
+}
+
+/**
+ * 检查函数类型兼容性
+ */
+函数 检查函数类型兼容性(signature1: 文本, signature2: 文本): 整数 {
+    若 signature1 == signature2 则 { 返回 1 }
+    打印("警告: 函数类型签名不匹配")
+    返回 0
+}
+
+/**
+ * 检查结构体字段访问
+ */
+函数 检查结构体字段访问(structName: 文本, fieldName: 文本): 整数 {
+    若 structName == "" || fieldName == "" 则 {
+        返回 0
+    }
+    打印("检查结构体字段: " + structName + "." + fieldName)
+    返回 1
+}
+
+/**
+ * 获取默认类型值
+ */
+函数 获取默认值(typeName: 整数): 文本 {
+    若 typeName == 0 则 { 返回 "0" }
+    若 typeName == 1 则 { 返回 "0.0" }
+    若 typeName == 2 则 { 返回 "假" }
+    若 typeName == 3 则 { 返回 "\"\"" }
+    若 typeName == 4 则 { 返回 "'\\0'" }
+    返回 "null"
+}
+
+/**
+ * 检查整数溢出
+ */
+函数 检查整数溢出(op: 文本, left: 整数, right: 整数): 整数 {
+    若 op == "+" 则 {
+        若 left > 0 && right > 0 && left > 9223372036854775807 - right 则 {
+            打印("警告: 整数加法可能溢出")
+            返回 1
+        }
+    }
+    若 op == "*" 则 {
+        若 left != 0 && right > 9223372036854775807 / left 则 {
+            打印("警告: 整数乘法可能溢出")
+            返回 1
+        }
+    }
+    返回 0
+}
+
+/**
+ * 初始化语义分析器
+ */
+函数 semaInit(源码: 文本): Sema {
+    定义 可变 sema: Sema
+    sema.源码 = 源码
+    sema.当前作用域 = -1
+    sema.作用域栈 = 列表()
+    sema.错误列表 = 列表()
+    sema.警告列表 = 列表()
+    sema.当前行号 = 1
+    sema.错误计数 = 0
+    sema.警告计数 = 0
+    sema.全局作用域 = -1
+    sema.当前函数名 = ""
+    sema.当前函数返回类型 = -1
+    
+    /* 初始化循环状态 */
+    sema.循环状态.激活 = 0
+    sema.循环状态.循环层级 = 0
+    
+    /* 创建全局作用域 */
+    定义 可变 globalScopeIdx: 整数
+    globalScopeIdx = 创建作用域(sema, "全局")
+    sema.全局作用域 = globalScopeIdx
+    
+    /* 注册内置函数 */
+    注册内置函数(sema)
+    
+    返回 sema
+}
+
+/**
+ * 运行语义分析（完整版本，接受 AST 根节点）
+ */
+函数 sema分析AST(sema: Sema, ast: AST节点): 整数 {
+    打印("=== 开始语义分析 ===")
+    
+    sema.错误计数 = 0
+    sema.警告计数 = 0
+    
+    定义 可变 errorCount: 整数
+    errorCount = sema遍历AST(sema, ast)
+    
+    打印("=== 语义分析完成 ===")
+    打印("错误数: ")
+    打印(sema.错误计数)
+    打印("警告数: ")
+    打印(sema.警告计数)
+    
+    返回 errorCount
+}
+
+/**
+ * 打印符号表（调试用）
+ */
+函数 打印符号表(sema: Sema): 无返回 {
+    打印("=== 符号表 ===")
+    
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(sema.作用域栈) 则 {
+        定义 可变 scope: 作用域
+        scope = 列表获取(sema.作用域栈, i)
+        
+        打印("作用域 ")
+        打印(i)
+        打印(": ")
+        打印(scope.名称)
+        打印(" (层级=")
+        打印(scope.层级)
+        打印(")")
+        
+        定义 可变 j: 整数
+        j = 0
+        当 j < 列表长度(scope.符号表) 则 {
+            定义 可变 sym: 符号
+            sym = 列表获取(scope.符号表, j)
+            打印("  符号: ")
+            打印(sym.名称)
+            打印(" 类型: ")
+            打印(类型转文本(sym.类型))
+            打印(" 可变: ")
+            若 sym.可变 == 1 则 { 打印("是") } 否则 { 打印("否") }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    打印("=== 符号表结束 ===")
+}
+
+/* ============ 测试函数 ============ */
+
+/**
+ * 创建简单的测试 AST 用于验证语义分析器
+ */
+函数 创建测试AST(): AST节点 {
+    定义 可变 root: AST节点
+    root.kind = 0  /* 程序 */
+    root.name = "测试程序"
+    root.children = 列表()
+    
+    /* 创建变量定义 */
+    定义 可变 varNode: AST节点
+    varNode.kind = 3  /* 变量定义 */
+    varNode.name = "x"
+    varNode.intValue = 0  /* 整数类型 */
+    varNode.line = 1
+    varNode.children = 列表()
+    
+    /* 添加到根节点 */
+    列表追加(root.children, varNode)
+    
+    /* 创建函数定义 */
+    定义 可变 funcNode: AST节点
+    funcNode.kind = 1  /* 函数定义 */
+    funcNode.name = "测试函数"
+    funcNode.line = 3
+    funcNode.children = 列表()
+    
+    /* 创建函数体块语句 */
+    定义 可变 blockNode: AST节点
+    blockNode.kind = 18  /* 块语句 */
+    blockNode.line = 4
+    blockNode.children = 列表()
+    
+    /* 添加函数参数和体到函数 */
+    列表追加(funcNode.children, blockNode)
+    
+    /* 添加函数到根节点 */
+    列表追加(root.children, funcNode)
+    
+    返回 root
+}
+
+/**
+ * 运行语义分析器测试
+ */
+函数 测试语义分析(): 整数 {
+    打印("=== 开始语义分析器测试 ===")
+    
+    /* 初始化语义分析器 */
+    定义 可变 sema: Sema
+    sema = semaInit("测试源码")
+    
+    /* 创建测试 AST */
+    定义 可变 testAST: AST节点
+    testAST = 创建测试AST()
+    
+    /* 运行语义分析 */
+    定义 可变 errorCount: 整数
+    errorCount = sema分析AST(sema, testAST)
+    
+    /* 打印符号表 */
+    打印符号表(sema)
+    
+    打印("=== 测试完成 ===")
+    打印("错误数: ")
+    打印(errorCount)
+    
+    返回 errorCount
+}

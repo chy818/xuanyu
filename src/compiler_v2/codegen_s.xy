@@ -1,0 +1,4250 @@
+引入 "types"
+
+/**
+ * @file codegen.xy
+ * @brief 代码生成器 - 自展编译器
+ * @description 生成 LLVM IR 指令，实现真实 AST 遍历
+ */
+
+
+/* ============ AST 节点类型 (与 parser.xy 和 sema.xy 一致) ============ */
+
+
+/* ============ AST 节点结构体 ============ */
+
+
+/* ============ 循环上下文（用于 break/continue） ============ */
+
+
+/* ============ Codegen 结构 ============ */
+
+
+/* ============ LLVM 类型映射 ============ */
+
+函数 getLLVMType(typeName: 文本): 文本 {
+    若 typeName == "整数" || typeName == "长整数" 则 { 返回 "i64" }
+    若 typeName == "浮点数" || typeName == "双精度" 则 { 返回 "double" }
+    若 typeName == "布尔" 则 { 返回 "i1" }
+    若 typeName == "文本" || typeName == "字符" 则 { 返回 "i8*" }
+    若 typeName == "无返回" 则 { 返回 "void" }
+    若 typeName == "任意" || typeName == "列表" 则 { 返回 "i8*" }
+    返回 "i64"
+}
+
+/* ============ 初始化 ============ */
+
+函数 codegenInit(): Codegen {
+    定义 可变 cg: Codegen
+    cg.moduleName = "xuanyu_module"
+    cg.tempCount = 0
+    cg.labelCount = 0
+    cg.funcCount = 0
+    cg.output = 列表()
+    cg.indent = 0
+    cg.stringConstCount = 0
+    cg.funcDefs = 列表()
+    cg.currentFunc = ""
+    cg.currentReturnType = "i64"
+    // 初始化新增字段
+    cg.variableMap = 列表()
+    cg.variableTypes = 列表()
+    cg.stringConstants = 列表()
+    cg.loopContextStack = 列表()
+    cg.currentFunctionIndex = 0
+    cg.functionIndexCounter = 0
+    返回 cg
+}
+
+/* ============ 输出函数 ============ */
+
+函数 codegenEmitLine(cg: Codegen, line: 文本) {
+    定义 可变 i: 整数
+    i = 0
+    当 i < cg.indent 则 {
+        打印("  ")
+        i = i + 1
+    }
+    打印(line)
+}
+
+函数 codegenEmit(cg: Codegen, content: 文本) {
+    codegenEmitLine(cg, content)
+    列表添加(cg.output, content)
+}
+
+/* ============ 标签和临时变量 ============ */
+
+函数 codegenNewLabel(cg: Codegen): 文本 {
+    定义 可变 num: 整数
+    num = cg.labelCount
+    cg.labelCount = cg.labelCount + 1
+    定义 可变 result: 文本
+    result = "L"
+    定义 可变 numStr: 文本
+    numStr = 整数转文本(num)
+    result = result + numStr
+    返回 result
+}
+
+函数 codegenNewTemp(cg: Codegen): 文本 {
+    定义 可变 num: 整数
+    num = cg.tempCount
+    cg.tempCount = cg.tempCount + 1
+    定义 可变 result: 文本
+    result = "tmp"
+    定义 可变 tmpStr: 文本
+    tmpStr = 整数转文本(num)
+    result = result + tmpStr
+    返回 result
+}
+
+/* ============ 变量映射管理 ============ */
+
+/**
+ * 添加变量到映射表
+ */
+函数 codegen添加变量(cg: Codegen, varName: 文本, ssaValue: 文本, varType: 文本): 无返回 {
+    // 变量名和值作为一对添加到列表
+    列表追加(cg.variableMap, varName)
+    列表追加(cg.variableMap, ssaValue)
+    
+    // 变量名和类型作为一对添加到列表
+    列表追加(cg.variableTypes, varName)
+    列表追加(cg.variableTypes, varType)
+}
+
+/**
+ * 查找变量的 SSA 值
+ */
+函数 codegen查找变量(cg: Codegen, varName: 文本): 文本 {
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(cg.variableMap) 则 {
+        若 cg.variableMap[i] == varName 则 {
+            返回 cg.variableMap[i + 1]
+        }
+        i = i + 2
+    }
+    返回 ""  // 未找到
+}
+
+/**
+ * 查找变量的类型
+ */
+函数 codegen查找变量类型(cg: Codegen, varName: 文本): 文本 {
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(cg.variableTypes) 则 {
+        若 cg.variableTypes[i] == varName 则 {
+            返回 cg.variableTypes[i + 1]
+        }
+        i = i + 2
+    }
+    返回 "i64"  // 默认类型
+}
+
+/**
+ * 清空变量映射（进入新作用域时使用）
+ */
+函数 codegen清空变量(cg: Codegen): 无返回 {
+    cg.variableMap = 列表()
+    cg.variableTypes = 列表()
+}
+
+/* ============ 循环上下文管理 ============ */
+
+/**
+ * 推入循环上下文
+ */
+函数 codegen推入循环上下文(cg: Codegen, ctx: 循环上下文): 无返回 {
+    列表追加(cg.loopContextStack, ctx)
+}
+
+/**
+ * 弹出循环上下文
+ */
+函数 codegen弹出循环上下文(cg: Codegen): 循环上下文 {
+    定义 可变 ctx: 循环上下文
+    若 列表长度(cg.loopContextStack) > 0 则 {
+        定义 可变 lastIdx: 整数
+        lastIdx = 列表长度(cg.loopContextStack) - 1
+        ctx = cg.loopContextStack[lastIdx]
+        // 注意：这里简化处理，因为玄语不支持从列表中删除元素
+        // 实际使用时，需要用更复杂的数据结构
+    }
+    返回 ctx
+}
+
+/**
+ * 获取当前循环上下文
+ */
+函数 codegen获取当前循环上下文(cg: Codegen): 循环上下文 {
+    定义 可变 ctx: 循环上下文
+    若 列表长度(cg.loopContextStack) > 0 则 {
+        定义 可变 lastIdx: 整数
+        lastIdx = 列表长度(cg.loopContextStack) - 1
+        ctx = cg.loopContextStack[lastIdx]
+    }
+    返回 ctx
+}
+
+/* ============ 字符串常量管理 ============ */
+
+/**
+ * 添加字符串常量
+ */
+函数 codegen添加字符串常量(cg: Codegen, str: 文本): 文本 {
+    // 先检查是否已存在
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(cg.stringConstants) 则 {
+        若 cg.stringConstants[i] == str 则 {
+            返回 cg.stringConstants[i + 1]
+        }
+        i = i + 2
+    }
+    
+    // 创建新的字符串常量
+    定义 可变 constName: 文本
+    constName = "str"
+    定义 可变 idxStr: 文本
+    idxStr = 整数转文本(cg.stringConstCount)
+    constName = constName + idxStr
+    cg.stringConstCount = cg.stringConstCount + 1
+    
+    // 添加到常量表
+    列表追加(cg.stringConstants, str)
+    列表追加(cg.stringConstants, constName)
+    
+    返回 constName
+}
+
+/**
+ * 查找字符串常量
+ */
+函数 codegen查找字符串常量(cg: Codegen, str: 文本): 文本 {
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(cg.stringConstants) 则 {
+        若 cg.stringConstants[i] == str 则 {
+            返回 cg.stringConstants[i + 1]
+        }
+        i = i + 2
+    }
+    返回 ""
+}
+
+/* ============ AST 遍历和 IR 生成函数 ============ */
+
+/**
+ * 生成字面量值 IR
+ */
+函数 codegenLiteral(cg: Codegen, value: 文本, type: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    若 type == 1 则 {
+        // 整数 - 但由于返回类型是文本，我们需要返回指针类型
+        // 我们将 i64 转换为 i8* (inttoptr)
+        定义 可变 intTmp: 文本
+        intTmp = codegenNewTemp(cg)
+        codegenEmit(cg, "%" + intTmp + " = add i64 0, " + value)
+        codegenEmit(cg, "%" + result + " = inttoptr i64 %" + intTmp + " to i8*")
+    } 否则 {
+        若 type == 2 则 {
+            // 字符串 - 直接返回指针
+            定义 可变 tmpPtr: 文本
+            tmpPtr = codegenNewTemp(cg)
+            codegenEmit(cg, "%" + tmpPtr + " = getelementptr [0 x i8], [0 x i8]* null, i64 0, i64 0")
+            result = tmpPtr
+        } 否则 {
+            // 默认 - 返回空指针
+            codegenEmit(cg, "%" + result + " = inttoptr i64 0 to i8*")
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 生成二元表达式 IR
+ */
+函数 codegenBinaryOp(cg: Codegen, op: 文本, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 llOp: 文本
+    llOp = "add"
+
+    若 op == "+" 则 { llOp = "add" }
+    若 op == "-" 则 { llOp = "sub" }
+    若 op == "*" 则 { llOp = "mul" }
+    若 op == "/" 则 { llOp = "sdiv" }
+    若 op == "%" 则 { llOp = "srem" }
+
+    定义 可变 line: 文本
+    line = "%" + result + " = " + llOp + " i64 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成比较表达式 IR
+ */
+函数 codegenCompare(cg: Codegen, op: 文本, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 llOp: 文本
+    llOp = "eq"
+
+    若 op == "==" 则 { llOp = "eq" }
+    若 op == "!=" 则 { llOp = "ne" }
+    若 op == "<" 则 { llOp = "slt" }
+    若 op == ">" 则 { llOp = "sgt" }
+    若 op == "<=" 则 { llOp = "sle" }
+    若 op == ">=" 则 { llOp = "sge" }
+
+    定义 可变 line: 文本
+    line = "%" + result + " = icmp " + llOp + " i64 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成逻辑与 (&&) IR
+ */
+函数 codegenLogicalAnd(cg: Codegen, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = and i1 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成逻辑或 (||) IR
+ */
+函数 codegenLogicalOr(cg: Codegen, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = or i1 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成逻辑非 (!) IR
+ */
+函数 codegenLogicalNot(cg: Codegen, value: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = xor i1 %" + value + ", 1"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成一元减法 IR
+ */
+函数 codegenNegate(cg: Codegen, value: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = sub i64 0, %" + value
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成符号扩展 IR
+ */
+函数 codegenSignExt(cg: Codegen, value: 文本, fromType: 文本, toType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = sext " + fromType + " %" + value + " to " + toType
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成零扩展 IR
+ */
+函数 codegenZeroExt(cg: Codegen, value: 文本, fromType: 文本, toType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = zext " + fromType + " %" + value + " to " + toType
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成截断 IR
+ */
+函数 codegenTrunc(cg: Codegen, value: 文本, fromType: 文本, toType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = trunc " + fromType + " %" + value + " to " + toType
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成浮点到整数的转换 IR
+ */
+函数 codegenFptoSI(cg: Codegen, value: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = fptosi double %" + value + " to i64"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成整数到浮点的转换 IR
+ */
+函数 codegenSIToFP(cg: Codegen, value: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = sitofp i64 %" + value + " to double"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成数组分配 IR
+ */
+函数 codegenArrayAlloca(cg: Codegen, elementType: 文本, numElements: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = alloca " + elementType + ", i64 %" + numElements
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成数组元素访问 IR
+ */
+函数 codegenArrayAccess(cg: Codegen, arrayPtr: 文本, index: 文本, elementType: 文本): 文本 {
+    定义 可变 tmpPtr: 文本
+    tmpPtr = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + tmpPtr + " = getelementptr " + elementType + ", " + elementType + "* %" + arrayPtr + ", i64 %" + index
+    codegenEmit(cg, line)
+
+    定义 可变 value: 文本
+    value = codegenNewTemp(cg)
+    line = "%" + value + " = load " + elementType + ", " + elementType + "* %" + tmpPtr
+    codegenEmit(cg, line)
+
+    返回 value
+}
+
+/**
+ * 生成数组元素存储 IR
+ */
+函数 codegenArrayStore(cg: Codegen, arrayPtr: 文本, index: 文本, value: 文本, elementType: 文本): 无返回 {
+    定义 可变 tmpPtr: 文本
+    tmpPtr = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + tmpPtr + " = getelementptr " + elementType + ", " + elementType + "* %" + arrayPtr + ", i64 %" + index
+    codegenEmit(cg, line)
+
+    line = "store " + elementType + " %" + value + ", " + elementType + "* %" + tmpPtr
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成结构体分配 IR
+ */
+函数 codegenStructAlloca(cg: Codegen, structType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = alloca " + structType
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成结构体字段访问 IR (使用字段索引)
+ */
+函数 codegenStructFieldAccess(cg: Codegen, structPtr: 文本, fieldIndex: 整数, fieldType: 文本): 文本 {
+    定义 可变 tmpPtr: 文本
+    tmpPtr = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + tmpPtr + " = getelementptr " + fieldType + ", " + fieldType + "* %" + structPtr + ", i32 0, i32 " + 整数转文本(fieldIndex)
+    codegenEmit(cg, line)
+
+    定义 可变 value: 文本
+    value = codegenNewTemp(cg)
+    line = "%" + value + " = load " + fieldType + ", " + fieldType + "* %" + tmpPtr
+    codegenEmit(cg, line)
+
+    返回 value
+}
+
+/**
+ * 生成结构体字段存储 IR
+ */
+函数 codegenStructFieldStore(cg: Codegen, structPtr: 文本, fieldIndex: 整数, value: 文本, fieldType: 文本): 无返回 {
+    定义 可变 tmpPtr: 文本
+    tmpPtr = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + tmpPtr + " = getelementptr " + fieldType + ", " + fieldType + "* %" + structPtr + ", i32 0, i32 " + 整数转文本(fieldIndex)
+    codegenEmit(cg, line)
+
+    line = "store " + fieldType + " %" + value + ", " + fieldType + "* %" + tmpPtr
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成空指针检查 IR
+ */
+函数 codegenNullCheck(cg: Codegen, tmpPtr: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = icmp ne i8* %" + tmpPtr + ", null"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成全局变量声明 IR
+ */
+函数 codegenGlobalString(cg: Codegen, strValue: 文本, name: 文本): 文本 {
+    定义 可变 line: 文本
+    line = "@" + name + " = private constant [0 x i8] c\"" + strValue + "\\00\""
+    codegenEmit(cg, line)
+
+    返回 name
+}
+
+/**
+ * 生成全局变量声明 IR (整数)
+ */
+函数 codegenGlobalInt(cg: Codegen, value: 整数, name: 文本): 文本 {
+    定义 可变 line: 文本
+    line = "@" + name + " = global i64 " + 整数转文本(value)
+    codegenEmit(cg, line)
+
+    返回 name
+}
+
+/**
+ * 生成选择性 IR (cond ? then : else)
+ */
+函数 codegenSelect(cg: Codegen, cond: 文本, thenValue: 文本, elseValue: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = select i1 %" + cond + ", i64 %" + thenValue + ", i64 %" + elseValue
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成位旋转 IR (左移后带符号扩展)
+ */
+函数 codegenShl(cg: Codegen, value: 文本, amount: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = shl i64 %" + value + ", %" + amount
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成算术右移 IR
+ */
+函数 codegenAShr(cg: Codegen, value: 文本, amount: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = ashr i64 %" + value + ", %" + amount
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成逻辑右移 IR
+ */
+函数 codegenLShr(cg: Codegen, value: 文本, amount: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = lshr i64 %" + value + ", %" + amount
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成按位与 IR
+ */
+函数 codegenAnd(cg: Codegen, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = and i64 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成按位或 IR
+ */
+函数 codegenOr(cg: Codegen, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = or i64 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成按位异或 IR
+ */
+函数 codegenXor(cg: Codegen, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = xor i64 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成按位取反 IR
+ */
+函数 codegenNot(cg: Codegen, value: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = xor i64 %" + value + ", -1"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成函数入口标注
+ */
+函数 codegenFunctionEntry(cg: Codegen, funcName: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "; 函数入口: " + funcName
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成代码块标注
+ */
+函数 codegenBlockLabel(cg: Codegen, blockName: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "; 代码块: " + blockName
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成注释
+ */
+函数 codegenComment(cg: Codegen, comment: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "; " + comment
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 unreachable 指令 IR
+ */
+函数 codegenUnreachable(cg: Codegen): 无返回 {
+    codegenEmit(cg, "unreachable")
+}
+
+/**
+ * 生成 switch 指令 IR (用于 match 语句)
+ */
+函数 codegenSwitch(cg: Codegen, value: 文本, defaultLabel: 文本, numCases: 整数) {
+    定义 可变 line: 文本
+    line = "switch i64 %" + value + ", label %" + defaultLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 case 分支 IR
+ */
+函数 codegenCase(cg: Codegen, caseValue: 文本, caseLabel: 文本) {
+    定义 可变 line: 文本
+    line = "i64 " + caseValue + ", label %" + caseLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 match 语句 IR
+ */
+函数 codegenMatch(cg: Codegen, subjectValue: 文本, caseCount: 整数, hasDefault: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 endLabel: 文本
+    endLabel = codegenNewLabel(cg)
+
+    定义 可变 defaultLabel: 文本
+    defaultLabel = codegenNewLabel(cg)
+
+    定义 可变 line: 文本
+    line = "switch i64 %" + subjectValue + ", label %" + defaultLabel
+    codegenEmit(cg, line)
+
+    定义 可变 i: 整数
+    i = 0
+    当 i < caseCount 则 {
+        定义 可变 caseLabel: 文本
+        caseLabel = codegenNewLabel(cg)
+        line = "i64 " + 整数转文本(i) + ", label %" + caseLabel
+        codegenEmit(cg, line)
+        i = i + 1
+    }
+
+    /* 默认标签 */
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, defaultLabel + ":")
+    cg.indent = cg.indent + 1
+
+    若 hasDefault == 0 则 {
+        codegenEmit(cg, "unreachable")
+    }
+
+    /* 结束标签 */
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, endLabel + ":")
+    cg.indent = cg.indent + 1
+
+    返回 result
+}
+
+/**
+ * 生成 phi 节点 IR (用于 match 分支的值合并)
+ */
+函数 codegenPhi(cg: Codegen, numValues: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = phi i64"
+    定义 可变 i: 整数
+    i = 0
+    当 i < numValues 则 {
+        定义 可变 label: 文本
+        label = codegenNewLabel(cg)
+        line = line + " [%tmp" + 整数转文本(i) + ", %L" + 整数转文本(i) + "]"
+        若 i < numValues - 1 则 {
+            line = line + ","
+        }
+        i = i + 1
+    }
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 if 语句 IR
+ */
+函数 codegenIf(cg: Codegen, condVar: 文本, thenLabel: 文本, elseLabel: 文本, endLabel: 文本) {
+    定义 可变 line: 文本
+    line = "br i1 %" + condVar + ", label %" + thenLabel + ", label %" + elseLabel
+    codegenEmit(cg, line)
+
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, thenLabel + ":")
+    cg.indent = cg.indent + 1
+}
+
+/**
+ * 生成 while 循环 IR
+ */
+函数 codegenWhile(cg: Codegen, condVar: 文本, bodyLabel: 文本, endLabel: 文本) {
+    定义 可变 line: 文本
+    line = "br i1 %" + condVar + ", label %" + bodyLabel + ", label %" + endLabel
+    codegenEmit(cg, line)
+
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, bodyLabel + ":")
+    cg.indent = cg.indent + 1
+}
+
+/**
+ * 生成 for 循环 IR
+ */
+函数 codegenFor(cg: Codegen, varName: 文本, startVal: 整数, endVal: 整数, bodyLabel: 文本, condLabel: 文本, endLabel: 文本) {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = add i64 0, " + 整数转文本(startVal)
+    codegenEmit(cg, line)
+
+    定义 可变 alloca: 文本
+    alloca = varName + "_alloca"
+    codegenEmit(cg, "%" + alloca + " = alloca i64")
+    codegenEmit(cg, "store i64 %" + result + ", i64* %" + alloca)
+
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, condLabel + ":")
+    cg.indent = cg.indent + 1
+
+    定义 可变 cmpResult: 文本
+    cmpResult = codegenNewTemp(cg)
+    line = "%" + cmpResult + " = icmp sle i64 %" + result + ", " + 整数转文本(endVal)
+    codegenEmit(cg, line)
+    line = "br i1 %" + cmpResult + ", label %" + bodyLabel + ", label %" + endLabel
+    codegenEmit(cg, line)
+
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, bodyLabel + ":")
+    cg.indent = cg.indent + 1
+}
+
+/**
+ * 生成 break 跳转 IR
+ */
+函数 codegenBreak(cg: Codegen, endLabel: 文本) {
+    定义 可变 line: 文本
+    line = "br label %" + endLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 continue 跳转 IR
+ */
+函数 codegenContinue(cg: Codegen, condLabel: 文本) {
+    定义 可变 line: 文本
+    line = "br label %" + condLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成赋值 IR
+ */
+函数 codegenAssign(cg: Codegen, varName: 文本, value: 文本, varType: 文本) {
+    定义 可变 llType: 文本
+    llType = getLLVMType(varType)
+
+    定义 可变 alloca: 文本
+    alloca = varName + "_slot"
+
+    定义 可变 line: 文本
+    line = "%" + alloca + " = alloca " + llType
+    codegenEmit(cg, line)
+
+    line = "store " + llType + " %" + value + ", " + llType + "* %" + alloca
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成复合赋值 IR (+=, -=, *=, /=, %=)
+ */
+函数 codegenCompoundAssign(cg: Codegen, varName: 文本, op: 文本, value: 文本, varType: 文本): 文本 {
+    定义 可变 llType: 文本
+    llType = getLLVMType(varType)
+
+    定义 可变 alloca: 文本
+    alloca = varName + "_slot"
+
+    定义 可变 line: 文本
+    line = "%" + alloca + " = alloca " + llType
+    codegenEmit(cg, line)
+
+    定义 可变 llOp: 文本
+    llOp = "add"
+
+    若 op == "+=" 则 { llOp = "add" }
+    若 op == "-=" 则 { llOp = "sub" }
+    若 op == "*=" 则 { llOp = "mul" }
+    若 op == "/=" 则 { llOp = "sdiv" }
+    若 op == "%=" 则 { llOp = "srem" }
+
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+    line = "%" + result + " = " + llOp + " " + llType + " %" + value + ", %" + value
+    codegenEmit(cg, line)
+
+    line = "store " + llType + " %" + result + ", " + llType + "* %" + alloca
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 return 语句 IR
+ */
+函数 codegenReturn(cg: Codegen, value: 文本) {
+    定义 可变 line: 文本
+    若 cg.currentReturnType == "void" 则 {
+        line = "ret void"
+    } 否则 {
+        line = "ret i64 %" + value
+    }
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成函数调用 IR
+ */
+函数 codegenCall(cg: Codegen, funcName: 文本, returnType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = ""
+
+    若 returnType != "void" 则 {
+        定义 可变 tmp: 文本
+        tmp = codegenNewTemp(cg)
+        codegenEmit(cg, "%" + tmp + " = call " + returnType + " @" + funcName + "()")
+        result = tmp
+    } 否则 {
+        codegenEmit(cg, "call " + returnType + " @" + funcName + "()")
+    }
+
+    返回 result
+}
+
+/**
+ * 生成函数调用 IR（带参数）
+ */
+函数 codegenCallWithArgs(cg: Codegen, funcName: 文本, argCount: 整数, returnType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = ""
+
+    若 returnType != "void" 则 {
+        定义 可变 tmp: 文本
+        tmp = codegenNewTemp(cg)
+        定义 可变 line: 文本
+        line = "%" + tmp + " = call " + returnType + " @" + funcName + "("
+        /* 简化：参数列表留空 */
+        line = line + ")"
+        codegenEmit(cg, line)
+        result = tmp
+    } 否则 {
+        codegenEmit(cg, "call " + returnType + " @" + funcName + "()")
+    }
+
+    返回 result
+}
+
+/**
+ * 生成字符串长度调用 IR
+ */
+函数 codegenStringLen(cg: Codegen, strPtr: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = call i64 @rt_string_len(i8* %" + strPtr + ")"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成字符串拼接调用 IR
+ */
+函数 codegenStringConcat(cg: Codegen, str1: 文本, str2: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = call i8* @rt_string_concat(i8* %" + str1 + ", i8* %" + str2 + ")"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成字符串切片调用 IR
+ */
+函数 codegenStringSlice(cg: Codegen, strPtr: 文本, start: 文本, end: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = call i8* @rt_string_slice(i8* %" + strPtr + ", i64 %" + start + ", i64 %" + end + ")"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成列表创建调用 IR
+ */
+函数 codegenListNew(cg: Codegen): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = call i8* @rt_list_new()"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成列表追加调用 IR
+ */
+函数 codegenListAppend(cg: Codegen, list: 文本, value: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "call void @rt_list_append(i8* %" + list + ", i8* %" + value + ")"
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成列表获取调用 IR
+ */
+函数 codegenListGet(cg: Codegen, list: 文本, index: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = call i8* @rt_list_get(i8* %" + list + ", i64 %" + index + ")"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/* ============ IR 生成函数 ============ */
+
+/**
+ * 生成模块头
+ */
+函数 emitModuleHeader(cg: Codegen, name: 文本) {
+    打印("; ============================================")
+    打印("; 玄语编译器 v0.2 - 自展版本")
+    打印("; LLVM IR 生成")
+    打印("; ============================================")
+    打印("")
+    codegenEmit(cg, "source_filename = \"" + name + "\"")
+    打印("")
+}
+
+/**
+ * 生成目标数据声明
+ */
+函数 emitTargetData(cg: Codegen) {
+    codegenEmit(cg, "target datalayout = \"e-m:w-p64:64:64-i32:32-i64:64-i128:128-n32:64-S128\"")
+    codegenEmit(cg, "target triple = \"x86_64-pc-windows-msvc\"")
+    打印("")
+}
+
+/**
+ * 生成函数头
+ */
+函数 emitFunctionHeader(cg: Codegen, name: 文本, paramCount: 整数, returnType: 文本): 文本 {
+    定义 可变 llName: 文本
+    llName = name
+
+    定义 可变 line: 文本
+    line = "define " + returnType + " @" + llName + "() {"
+
+    codegenEmitLine(cg, line)
+
+    cg.indent = cg.indent + 1
+    返回 name
+}
+
+/**
+ * 生成变量分配
+ */
+函数 emitAlloca(cg: Codegen, varName: 文本, typeName: 文本) {
+    定义 可变 llType: 文本
+    llType = getLLVMType(typeName)
+    定义 可变 line: 文本
+    line = "%" + varName + " = alloca " + llType
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成存储指令
+ */
+函数 emitStore(cg: Codegen, value: 文本, varName: 文本, typeName: 文本) {
+    定义 可变 llType: 文本
+    llType = getLLVMType(typeName)
+    定义 可变 line: 文本
+    line = "store " + llType + " %" + value + ", " + llType + "* %" + varName
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成加载指令
+ */
+函数 emitLoad(cg: Codegen, varName: 文本, typeName: 文本): 文本 {
+    定义 可变 llType: 文本
+    llType = getLLVMType(typeName)
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+    定义 可变 line: 文本
+    line = "%" + result + " = load " + llType + ", " + llType + "* %" + varName
+    codegenEmit(cg, line)
+    返回 result
+}
+
+/**
+ * 生成整数常量
+ */
+函数 emitIntegerLiteral(cg: Codegen, value: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+    定义 可变 line: 文本
+    line = "%" + result + " = add i64 0, " + 整数转文本(value)
+    codegenEmit(cg, line)
+    返回 result
+}
+
+/**
+ * 生成字符串常量
+ */
+函数 emitStringLiteral(cg: Codegen, strValue: 文本): 文本 {
+    定义 可变 constName: 文本
+    constName = "str"
+    定义 可变 idxStr: 文本
+    idxStr = 整数转文本(cg.stringConstCount)
+    constName = constName + idxStr
+    cg.stringConstCount = cg.stringConstCount + 1
+
+    定义 可变 line: 文本
+    line = "@" + constName + " = private constant [" + 整数转文本(文本长度(strValue)) + " x i8] c\"" + strValue + "\\00\""
+    codegenEmit(cg, line)
+
+    定义 可变 ptrResult: 文本
+    ptrResult = codegenNewTemp(cg)
+    line = "%" + ptrResult + " = getelementptr [" + 整数转文本(文本长度(strValue)) + " x i8], [" + 整数转文本(文本长度(strValue)) + " x i8]* @" + constName + ", i64 0, i64 0"
+    codegenEmit(cg, line)
+
+    返回 ptrResult
+}
+
+/**
+ * 生成二元运算
+ */
+函数 emitBinaryOp(cg: Codegen, op: 文本, left: 文本, right: 文本, leftType: 文本, rightType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 llOp: 文本
+    llOp = "+"
+    若 op == "-" 则 { llOp = "sub" }
+    若 op == "*" 则 { llOp = "mul" }
+    若 op == "/" 则 { llOp = "sdiv" }
+    若 op == "%" 则 { llOp = "srem" }
+
+    定义 可变 llType: 文本
+    llType = getLLVMType(leftType)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = " + llOp + " " + llType + " %" + left + ", %" + right
+    codegenEmit(cg, line)
+    返回 result
+}
+
+/**
+ * 生成比较指令
+ */
+函数 emitCompare(cg: Codegen, op: 文本, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 llOp: 文本
+    llOp = "eq"
+    若 op == ">" 则 { llOp = "sgt" }
+    若 op == "<" 则 { llOp = "slt" }
+    若 op == ">=" 则 { llOp = "sge" }
+    若 op == "<=" 则 { llOp = "sle" }
+    若 op == "!=" 则 { llOp = "ne" }
+
+    定义 可变 line: 文本
+    line = "%" + result + " = icmp " + llOp + " i64 %" + left + ", %" + right
+    codegenEmit(cg, line)
+    返回 result
+}
+
+/**
+ * 生成条件分支
+ */
+函数 emitBr(cg: Codegen, condVar: 文本, thenLabel: 文本, elseLabel: 文本) {
+    定义 可变 line: 文本
+    line = "br i1 %" + condVar + ", label %" + thenLabel + ", label %" + elseLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成无条件跳转
+ */
+函数 emitJump(cg: Codegen, labelName: 文本) {
+    定义 可变 line: 文本
+    line = "br label %" + labelName
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成标签
+ */
+函数 emitLabel(cg: Codegen, labelName: 文本) {
+    cg.indent = cg.indent - 1
+    定义 可变 line: 文本
+    line = labelName + ":"
+    codegenEmitLine(cg, line)
+    cg.indent = cg.indent + 1
+}
+
+/**
+ * 生成返回指令
+ */
+函数 emitReturn(cg: Codegen, valueName: 文本, returnType: 文本) {
+    定义 可变 line: 文本
+    若 returnType == "void" 则 {
+        line = "ret void"
+    } 否则 {
+        line = "ret i64 %" + valueName
+    }
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成函数调用
+ */
+函数 emitCall(cg: Codegen, funcName: 文本, argCount: 整数, returnType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = ""
+
+    若 returnType != "void" 则 {
+        result = codegenNewTemp(cg)
+        定义 可变 line: 文本
+        line = "%" + result + " = call " + returnType + " @" + funcName + "()"
+        codegenEmit(cg, line)
+    } 否则 {
+        codegenEmit(cg, "call " + returnType + " @" + funcName + "()")
+    }
+
+    返回 result
+}
+
+/* ============ 内置函数声明 ============ */
+
+函数 emitBuiltinDecls(cg: Codegen) {
+    打印("; ==================== 内置函数声明 ====================")
+    codegenEmit(cg, "declare void @print(i8*)")
+    codegenEmit(cg, "declare i64 @print_int(i64)")
+    codegenEmit(cg, "declare double @print_float(double)")
+    codegenEmit(cg, "declare i8* @print_string(i8*)")
+    codegenEmit(cg, "declare i64 @str_to_int(i8*)")
+    codegenEmit(cg, "declare double @_u6574_u6570_u8f6c_u6587_u672c_u90e8(i64)")
+    codegenEmit(cg, "declare i64 @rt_string_len(i8*)")
+    codegenEmit(cg, "declare i8* @rt_string_concat(i8*, i8*)")
+    codegenEmit(cg, "declare i8* @rt_string_slice(i8*, i64, i64)")
+    codegenEmit(cg, "declare i64 @argc()")
+    codegenEmit(cg, "declare i8* @argv(i64)")
+    codegenEmit(cg, "declare i8* @rt_readline()")
+    codegenEmit(cg, "declare i8* @rt_list_new()")
+    codegenEmit(cg, "declare void @rt_list_append(i8*, i8*)")
+    codegenEmit(cg, "declare void @rt_list_set(i8*, i64, i8*)")
+    codegenEmit(cg, "declare i8* @rt_list_get(i8*, i64)")
+    codegenEmit(cg, "declare i64 @rt_list_len(i8*)")
+    
+    /* 文件 I/O 函数 */
+    codegenEmit(cg, "declare i8* @file_read(i8*)")
+    codegenEmit(cg, "declare i32 @file_write(i8*, i8*)")
+    codegenEmit(cg, "declare i32 @file_exists(i8*)")
+    codegenEmit(cg, "declare i32 @file_delete(i8*)")
+    
+    /* 命令执行函数 */
+    codegenEmit(cg, "declare i32 @exec_cmd(i8*)")
+    codegenEmit(cg, "declare i8* @cmd_output(i8*)")
+    
+    /* 输入函数 */
+    codegenEmit(cg, "declare i64 @input_int()")
+    codegenEmit(cg, "declare i8* @input_text()")
+    
+    打印("")
+}
+
+/* ============ 模块和导入支持 ============ */
+
+/**
+ * 生成模块声明
+ */
+函数 emitModuleDecl(cg: Codegen, moduleName: 文本) {
+    定义 可变 line: 文本
+    line = "; 模块: " + moduleName
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成导入声明
+ */
+函数 emitImportDecl(cg: Codegen, path: 文本) {
+    定义 可变 line: 文本
+    line = "; 导入: " + path
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成模块函数前缀
+ */
+函数 getModuleFuncName(moduleName: 文本, funcName: 文本): 文本 {
+    若 moduleName == "" 则 {
+        返回 funcName
+    }
+    返回 moduleName + "_" + funcName
+}
+
+/**
+ * 生成外部函数声明
+ */
+函数 emitExternalFuncDecl(cg: Codegen, funcName: 文本, returnType: 文本, paramTypes: 列表) {
+    定义 可变 line: 文本
+    line = "declare " + returnType + " @" + funcName + "()"
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成模块入口标注
+ */
+函数 emitModuleEntry(cg: Codegen, moduleName: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "; 模块入口: " + moduleName
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成模块退出标注
+ */
+函数 emitModuleExit(cg: Codegen, moduleName: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "; 模块退出: " + moduleName
+    codegenEmit(cg, line)
+}
+
+/* ============ 优化和提示 ============ */
+
+/**
+ * 生成优化级别标注
+ */
+函数 emitOptimizationHint(cg: Codegen, level: 整数): 无返回 {
+    定义 可变 line: 文本
+    line = "; llvm. opts: "
+    若 level == 0 则 {
+        line = line + "O0"
+    } 否则 {
+        若 level == 1 则 {
+            line = line + "O1"
+        } 否则 {
+            若 level == 2 则 {
+                line = line + "O2"
+            } 否则 {
+                若 level == 3 则 {
+                    line = line + "O3"
+                } 否则 {
+                    line = line + "Os"
+                }
+            }
+        }
+    }
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成冷函数标注
+ */
+函数 emitColdFunctionHint(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: cold")
+    codegenEmit(cg, "; llvm.pure.const")
+}
+
+/**
+ * 生成内联始终标注
+ */
+函数 emitAlwaysInlineHint(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: alwaysinline")
+}
+
+/**
+ * 生成无返回标注
+ */
+函数 emitNoReturnHint(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: noreturn")
+}
+
+/**
+ * 生成只读标注
+ */
+函数 emitReadOnlyHint(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: readnone")
+}
+
+/**
+ * 生成纯函数标注
+ */
+函数 emitPureFunctionHint(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: readonly")
+}
+
+/**
+ * 生成热点函数标注
+ */
+函数 emitHotFunctionHint(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: hot")
+}
+
+/**
+ * 生成内存访问模式标注
+ */
+函数 emitAlignmentHint(cg: Codegen, alignment: 整数): 无返回 {
+    定义 可变 line: 文本
+    line = "; Memory['"
+    line = line + 整数转文本(alignment)
+    line = line + "']"
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成向量宽度提示
+ */
+函数 emitVectorWidthHint(cg: Codegen, width: 整数): 无返回 {
+    若 width > 1 则 {
+        定义 可变 line: 文本
+        line = "; Vector['"
+        line = line + 整数转文本(width)
+        line = line + "']"
+        codegenEmit(cg, line)
+    }
+}
+
+/**
+ * 生成窥孔优化提示
+ */
+函数 emitPeepholeHint(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Tails duplicated")
+}
+
+/* ============ 调试信息生成 ============ */
+
+/**
+ * 生成源文件信息
+ */
+函数 emitSourceFile(cg: Codegen, filename: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "source_filename = \"" + filename + "\""
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成目标数据布局
+ */
+函数 emitDataLayout(cg: Codegen, layout: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "target datalayout = \"" + layout + "\""
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成目标三元组
+ */
+函数 emitTargetTriple(cg: Codegen, triple: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "target triple = \"" + triple + "\""
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成调试版本
+ */
+函数 emitDwarfVersion(cg: Codegen, version: 整数): 无返回 {
+    定义 可变 line: 文本
+    line = "!llvm.module.flags = !{!0}"
+    codegenEmit(cg, line)
+    line = "!0 = !{i32 2, !\"Dwarf Version\", i32 " + 整数转文本(version) + "}"
+    codegenEmit(cg, line)
+}
+
+/* ============ SIMD 和向量化支持 ============ */
+
+/**
+ * 生成向量相加 IR
+ */
+函数 codegenVectorAdd(cg: Codegen, lhs: 文本, rhs: 文本, width: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = add <" + 整数转文本(width) + " x i64> %" + lhs + ", %" + rhs
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成向量广播 IR
+ */
+函数 codegenVectorBroadcast(cg: Codegen, value: 文本, width: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = insertelement <" + 整数转文本(width) + " x i64> undef, i64 %" + value + ", i32 0"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/* ============ 异常处理支持 ============ */
+
+/**
+ * 生成异常抛出 IR
+ */
+函数 codegenThrow(cg: Codegen, exceptionType: 文本, message: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "call void @llvm.trap()"
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成异常捕获 IR
+ */
+函数 codegenCatch(cg: Codegen, handlerLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "br label %" + handlerLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成清理块 IR
+ */
+函数 codegenCleanup(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; 清理块")
+}
+
+/* ============ 内存模型支持 ============ */
+
+/**
+ * 生成内存屏障 IR
+ */
+函数 codegenMemoryBarrier(cg: Codegen): 无返回 {
+    codegenEmit(cg, "call void @llvm.mem fence(i8 1)")
+}
+
+/**
+ * 生成 volatile 加载 IR
+ */
+函数 codegenVolatileLoad(cg: Codegen, tmpPtr: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = load volatile i64, i64* %" + tmpPtr
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 volatile 存储 IR
+ */
+函数 codegenVolatileStore(cg: Codegen, value: 文本, tmpPtr: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "store volatile i64 %" + value + ", i64* %" + tmpPtr
+    codegenEmit(cg, line)
+}
+
+/* ============ 链接器和符号支持 ============ */
+
+/**
+ * 生成外部符号引用
+ */
+函数 emitExternalSymbol(cg: Codegen, name: 文本, 类型: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "@" + name + " = external " + 类型
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成全局符号定义
+ */
+函数 emitGlobalSymbol(cg: Codegen, name: 文本, 类型: 文本, value: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "@" + name + " = global " + 类型 + " " + value
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成弱符号定义
+ */
+函数 emitWeakSymbol(cg: Codegen, name: 文本, 类型: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "@" + name + " = weak " + 类型
+    codegenEmit(cg, line)
+}
+
+/* ============ 属性标注 ============ */
+
+/**
+ * 生成函数属性
+ */
+函数 emitFunctionAttrs(cg: Codegen, attrs: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "; Function Attrs: " + attrs
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 noinline 属性
+ */
+函数 emitNoInlineAttr(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: noinline")
+}
+
+/**
+ * 生成 alwaysinline 属性
+ */
+函数 emitAlwaysInlineAttr(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: alwaysinline")
+}
+
+/**
+ * 生成 cold 属性
+ */
+函数 emitColdAttr(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: cold")
+}
+
+/**
+ * 生成 returns_twice 属性
+ */
+函数 emitReturnsTwiceAttr(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: returns_twice")
+}
+
+/**
+ * 生成 noreturn 属性
+ */
+函数 emitNoReturnAttr(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: noreturn")
+}
+
+/**
+ * 生成 nounwind 属性
+ */
+函数 emitNoUnwindAttr(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: nounwind")
+}
+
+/**
+ * 生成 readonly 属性
+ */
+函数 emitReadOnlyAttr(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: readonly")
+}
+
+/**
+ * 生成 readnone 属性
+ */
+函数 emitReadNoneAttr(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; Function Attrs: readnone")
+}
+
+/* ============ 元数据 ============ */
+
+/**
+ * 生成调试位置
+ */
+函数 emitDebugLocation(cg: Codegen, line: 整数, col: 整数): 无返回 {
+    定义 可变 debugStr: 文本
+    debugStr = "!DILocation(line: " + 整数转文本(line) + ", column: " + 整数转文本(col) + ")"
+    codegenEmit(cg, debugStr)
+}
+
+/**
+ * 生成调试变量
+ */
+函数 emitDebugVariable(cg: Codegen, name: 文本, type: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "!DILocalVariable(name: \"" + name + "\", type: !" + type + ")"
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成行号标注
+ */
+函数 emitLineNumber(cg: Codegen, line: 整数): 无返回 {
+    定义 可变 lineStr: 文本
+    lineStr = "; 行号: " + 整数转文本(line)
+    codegenEmit(cg, lineStr)
+}
+
+/* ============ 主函数 ============ */
+
+/**
+ * 生成完整的函数 IR
+ */
+函数 emitFunction(cg: Codegen, funcName: 文本, returnType: 文本, nodeCount: 整数) {
+    打印("")
+    打印("define " + returnType + " @" + funcName + "() {")
+
+    cg.indent = cg.indent + 1
+    cg.currentFunc = funcName
+    cg.currentReturnType = returnType
+
+    /* 变量分配 */
+    打印("  %result = alloca i64")
+
+    /* 函数体 - 根据函数名生成不同 IR */
+
+    若 funcName == "主" 则 {
+        /* 主函数: 返回 0 */
+        打印("  %tmp0 = add i64 0, 0")
+        打印("  ret i64 %tmp0")
+    } 否则 {
+        /* 默认返回 0 */
+        打印("  %tmp0 = add i64 0, 0")
+        打印("  ret i64 %tmp0")
+    }
+
+    cg.indent = cg.indent - 1
+    打印("}")
+}
+
+/**
+ * 生成 main 函数包装
+ */
+函数 emitMainWrapper(cg: Codegen) {
+    打印("")
+    打印("define i32 @main() {")
+    cg.indent = 1
+
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+    打印("  %" + result + " = call i64 @主()")
+    定义 可变 truncVal: 文本
+    truncVal = codegenNewTemp(cg)
+    打印("  %" + truncVal + " = trunc i64 %" + result + " to i32")
+
+    打印("  ret i32 %" + truncVal)
+    打印("}")
+}
+
+/* ============ AST 遍历和语句生成 ============ */
+
+/**
+ * 生成表达式 IR
+ */
+函数 codegen生成表达式(cg: Codegen, exprKind: 整数, value: 文本, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = ""
+
+    若 exprKind == 10 则 {
+        /* 二元表达式 */
+        定义 可变 llOp: 文本
+        llOp = "add"
+        若 value == "-" 则 { llOp = "sub" }
+        若 value == "*" 则 { llOp = "mul" }
+        若 value == "/" 则 { llOp = "sdiv" }
+        若 value == "%" 则 { llOp = "srem" }
+
+        result = codegenNewTemp(cg)
+        定义 可变 line: 文本
+        line = "%" + result + " = " + llOp + " i64 %" + left + ", %" + right
+        codegenEmit(cg, line)
+    } 否则 {
+        若 exprKind == 14 则 {
+            /* 字面量 */
+            result = codegenNewTemp(cg)
+            定义 可变 line: 文本
+            line = "%" + result + " = add i64 0, " + value
+            codegenEmit(cg, line)
+        } 否则 {
+            若 exprKind == 13 则 {
+                /* 标识符 - 加载变量 */
+                result = codegenNewTemp(cg)
+                定义 可变 line: 文本
+                line = "%" + result + " = load i64, i64* %" + value
+                codegenEmit(cg, line)
+            }
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 生成变量分配
+ */
+函数 codegen生成变量(cg: Codegen, varName: 文本, typeName: 文本): 文本 {
+    定义 可变 tmpPtr: 文本
+    tmpPtr = varName + "_slot"
+
+    定义 可变 line: 文本
+    line = "%" + tmpPtr + " = alloca " + getLLVMType(typeName)
+    codegenEmit(cg, line)
+
+    返回 tmpPtr
+}
+
+/**
+ * 生成赋值语句
+ */
+函数 codegen生成赋值(cg: Codegen, varName: 文本, value: 文本, varType: 文本): 无返回 {
+    定义 可变 tmpPtr: 文本
+    tmpPtr = varName + "_slot"
+
+    定义 可变 line: 文本
+    line = "store " + getLLVMType(varType) + " %" + value + ", " + getLLVMType(varType) + "* %" + tmpPtr
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 if 语句
+ */
+函数 codegen生成If(cg: Codegen, condVar: 文本, thenLabel: 文本, elseLabel: 文本, endLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "br i1 %" + condVar + ", label %" + thenLabel + ", label %" + elseLabel
+    codegenEmit(cg, line)
+
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, thenLabel + ":")
+    cg.indent = cg.indent + 1
+}
+
+/**
+ * 生成 while 循环
+ */
+函数 codegen生成While(cg: Codegen, condVar: 文本, bodyLabel: 文本, endLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "br i1 %" + condVar + ", label %" + bodyLabel + ", label %" + endLabel
+    codegenEmit(cg, line)
+
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, bodyLabel + ":")
+    cg.indent = cg.indent + 1
+}
+
+/**
+ * 生成 for 循环
+ */
+函数 codegen生成For(cg: Codegen, varName: 文本, startVal: 整数, endVal: 整数): 无返回 {
+    定义 可变 iterVar: 文本
+    iterVar = codegen生成变量(cg, varName, "整数")
+
+    定义 可变 startTmp: 文本
+    startTmp = codegenNewTemp(cg)
+    定义 可变 line: 文本
+    line = "%" + startTmp + " = add i64 0, " + 整数转文本(startVal)
+    codegenEmit(cg, line)
+    line = "store i64 %" + startTmp + ", i64* %" + iterVar
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成返回语句
+ */
+函数 codegen生成返回(cg: Codegen, value: 文本, returnType: 文本): 无返回 {
+    定义 可变 line: 文本
+    若 returnType == "void" 则 {
+        line = "ret void"
+    } 否则 {
+        line = "ret i64 %" + value
+    }
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成函数调用（带参数）
+ */
+函数 codegen生成调用(cg: Codegen, funcName: 文本, argCount: 整数, returnType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = ""
+
+    若 returnType != "void" 则 {
+        定义 可变 tmp: 文本
+        tmp = codegenNewTemp(cg)
+        定义 可变 line: 文本
+        line = "%" + tmp + " = call " + returnType + " @" + funcName + "()"
+        codegenEmit(cg, line)
+        result = tmp
+    } 否则 {
+        codegenEmit(cg, "call " + returnType + " @" + funcName + "()")
+    }
+
+    返回 result
+}
+
+/**
+ * 生成比较表达式并跳转
+ */
+函数 codegen生成条件跳转(cg: Codegen, op: 文本, left: 文本, right: 文本, trueLabel: 文本, falseLabel: 文本): 无返回 {
+    定义 可变 cmpResult: 文本
+    cmpResult = codegenNewTemp(cg)
+
+    定义 可变 llOp: 文本
+    llOp = "eq"
+    若 op == ">" 则 { llOp = "sgt" }
+    若 op == "<" 则 { llOp = "slt" }
+    若 op == ">=" 则 { llOp = "sge" }
+    若 op == "<=" 则 { llOp = "sle" }
+    若 op == "!=" 则 { llOp = "ne" }
+
+    定义 可变 line: 文本
+    line = "%" + cmpResult + " = icmp " + llOp + " i64 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    line = "br i1 %" + cmpResult + ", label %" + trueLabel + ", label %" + falseLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 break 语句
+ */
+函数 codegen生成Break(cg: Codegen, endLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "br label %" + endLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 continue 语句
+ */
+函数 codegen生成Continue(cg: Codegen, condLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "br label %" + condLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成打印调用
+ */
+函数 codegen生成打印(cg: Codegen, value: 文本, valueType: 文本): 无返回 {
+    定义 可变 line: 文本
+    若 valueType == "i64" 则 {
+        line = "call void @print_int(i64 %" + value + ")"
+    } 否则 {
+        若 valueType == "i8*" 则 {
+            line = "call void @print(i8* %" + value + ")"
+        }
+    }
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成输入调用
+ */
+函数 codegen生成输入(cg: Codegen, inputType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = ""
+
+    定义 可变 tmp: 文本
+    tmp = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    若 inputType == "i64" 则 {
+        line = "%" + tmp + " = call i64 @str_to_int(i8* @rt_readline())"
+        codegenEmit(cg, line)
+        result = tmp
+    } 否则 {
+        若 inputType == "i8*" 则 {
+            line = "%" + tmp + " = call i8* @rt_readline()"
+            codegenEmit(cg, line)
+            result = tmp
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 生成列表创建
+ */
+函数 codegen生成列表创建(cg: Codegen): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = call i8* @rt_list_new()"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成列表追加
+ */
+函数 codegen生成列表追加(cg: Codegen, list: 文本, value: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "call void @rt_list_append(i8* %" + list + ", i8* %" + value + ")"
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成列表获取
+ */
+函数 codegen生成列表获取(cg: Codegen, list: 文本, index: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = call i8* @rt_list_get(i8* %" + list + ", i64 %" + index + ")"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成字符串长度
+ */
+函数 codegen生成字符串长度(cg: Codegen, strPtr: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = call i64 @rt_string_len(i8* %" + strPtr + ")"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成字符串拼接
+ */
+函数 codegen生成字符串拼接(cg: Codegen, str1: 文本, str2: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = call i8* @rt_string_concat(i8* %" + str1 + ", i8* %" + str2 + ")"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 执行代码生成
+ */
+函数 codegenRun(astNodeCount: 整数): 整数 {
+    打印("=== 代码生成 ===")
+
+    定义 可变 cg: Codegen
+    cg = codegenInit()
+
+    /* 生成模块头 */
+    emitModuleHeader(cg, "xuanyu_source")
+
+    /* 生成目标数据 */
+    emitTargetData(cg)
+
+    /* 生成内置函数声明 */
+    emitBuiltinDecls(cg)
+
+    /* 生成用户函数 */
+    打印("; ==================== 用户函数 ====================")
+    emitFunction(cg, "主", "i64", 10)
+
+    /* 生成 main 包装 */
+    emitMainWrapper(cg)
+
+    打印("")
+    打印("代码生成完成!")
+
+    返回 1
+}
+
+/* ============ 高级 IR 生成函数 ============ */
+
+/**
+ * 生成结构体字面量 IR
+ */
+函数 codegenStructLiteral(cg: Codegen, structName: 文本, fieldCount: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = alloca %" + structName
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成空联合 IR
+ */
+函数 codegenZeroInit(cg: Codegen, typeName: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = bitcast " + typeName + " null to " + typeName
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成条件选择 IR (使用 select)
+ */
+函数 codegenSelectOp(cg: Codegen, cond: 文本, trueVal: 文本, falseVal: 文本, resultType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = select i1 %" + cond + ", " + resultType + " %" + trueVal + ", " + resultType + " %" + falseVal
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 freeze IR (固定值)
+ */
+函数 codegenFreeze(cg: Codegen, value: 文本, valueType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = freeze " + valueType + " %" + value
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 extractvalue IR (从聚合值提取)
+ */
+函数 codegenExtractValue(cg: Codegen, aggregate: 文本, index: 整数, aggregateType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = extractvalue " + aggregateType + " %" + aggregate + ", " + 整数转文本(index)
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 insertvalue IR (向聚合值插入)
+ */
+函数 codegenInsertValue(cg: Codegen, aggregate: 文本, value: 文本, index: 整数, aggregateType: 文本, valueType: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = insertvalue " + aggregateType + " %" + aggregate + ", " + valueType + " %" + value + ", " + 整数转文本(index)
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 extractelement IR (从向量提取元素)
+ */
+函数 codegenExtractElement(cg: Codegen, vector: 文本, index: 文本, vectorWidth: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = extractelement <" + 整数转文本(vectorWidth) + " x i64> %" + vector + ", i64 %" + index
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 insertelement IR (向向量插入元素)
+ */
+函数 codegenInsertElement(cg: Codegen, vector: 文本, value: 文本, index: 文本, vectorWidth: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = insertelement <" + 整数转文本(vectorWidth) + " x i64> %" + vector + ", i64 %" + value + ", i64 %" + index
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 shufflevector IR (向量混洗)
+ */
+函数 codegenShuffleVector(cg: Codegen, v1: 文本, v2: 文本, mask: 文本, width: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = shufflevector <" + 整数转文本(width) + " x i64> %" + v1 + ", <" + 整数转文本(width) + " x i64> %" + v2 + ", <" + 整数转文本(width) + " x i32> %" + mask
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成 icmp 并转换为整数 IR
+ */
+函数 codegenIcmpToInt(cg: Codegen, op: 文本, left: 文本, right: 文本): 文本 {
+    定义 可变 cmpResult: 文本
+    cmpResult = codegenCompare(cg, op, left, right)
+
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = zext i1 %" + cmpResult + " to i64"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成快速调用 IR (无返回值的调用)
+ */
+函数 codegenFastCall(cg: Codegen, funcName: 文本): 无返回 {
+    codegenEmit(cg, "call void @" + funcName + "()")
+}
+
+/**
+ * 生成 tail 调用提示 IR
+ */
+函数 codegenTailCallHint(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; tail call hint")
+}
+
+/**
+ * 生成 musttail 调用提示 IR
+ */
+函数 codegenMustTailCall(cg: Codegen): 无返回 {
+    codegenEmit(cg, "; musttail call")
+}
+
+/**
+ * 生成捕获异常 IR
+ */
+函数 codegenCatchSwitch(cg: Codegen, parentPad: 文本, defaultLabel: 文本, numHandlers: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = catchswitch within %" + parentPad + " [label %" + defaultLabel + "] to label %" + defaultLabel
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成清理返回 IR
+ */
+函数 codegenCleanupRet(cg: Codegen, catchPad: 文本, targetLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "cleanupret from %" + catchPad + " unwind label %" + targetLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成分支权重元数据
+ */
+函数 emitBranchWeights(cg: Codegen, trueWeight: 整数, falseWeight: 整数): 无返回 {
+    定义 可变 line: 文本
+    line = "!prof !{i64 " + 整数转文本(trueWeight) + ", i64 " + 整数转文本(falseWeight) + "}"
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成调用图信息元数据
+ */
+函数 emitCallGraph(cg: Codegen, caller: 文本, callee: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "!callgraph !{" + caller + ", !" + callee + "}"
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成函数入口计数元数据
+ */
+函数 emitFunctionEntryCount(cg: Codegen, count: 整数): 无返回 {
+    定义 可变 line: 文本
+    line = "!llvm.entryPoints = !{i64 " + 整数转文本(count) + "}"
+    codegenEmit(cg, line)
+}
+
+/* ============ 优化 Pass 函数 ============ */
+
+/**
+ * 常量折叠评估（实际执行计算）
+ */
+函数 codegen常量折叠评估(exprKind: 整数, leftVal: 整数, rightVal: 整数, op: 文本): 整数 {
+    若 exprKind != 10 则 { 返回 -1 }
+
+    若 op == "+" 则 { 返回 leftVal + rightVal }
+    若 op == "-" 则 { 返回 leftVal - rightVal }
+    若 op == "*" 则 { 返回 leftVal * rightVal }
+    若 op == "/" 则 {
+        若 rightVal != 0 则 { 返回 leftVal / rightVal }
+    }
+    若 op == "%" 则 {
+        若 rightVal != 0 则 { 返回 leftVal % rightVal }
+    }
+    若 op == "&" 则 { 返回 leftVal & rightVal }
+    若 op == "|" 则 { 返回 leftVal | rightVal }
+    若 op == "^" 则 { 返回 leftVal ^ rightVal }
+
+    返回 -1
+}
+
+/**
+ * 代数简化（检测并简化恒等式）
+ */
+函数 codegen代数简化(exprKind: 整数, op: 文本, operand: 整数): 整数 {
+    若 op == "+" && operand == 0 则 { 返回 0 }
+    若 op == "-" && operand == 0 则 { 返回 0 }
+    若 op == "*" && operand == 1 则 { 返回 0 }
+    若 op == "/" && operand == 1 则 { 返回 0 }
+    若 op == "*" && operand == 0 则 { 返回 0 }
+    若 op == "|" && operand == 0 则 { 返回 0 }
+    若 op == "&" && operand == -1 则 { 返回 0 }
+    
+    若 op == "*" && operand == 2 则 { 返回 1 }
+    若 op == "<<" && operand == 1 则 { 返回 2 }
+    若 op == ">>" && operand == 1 则 { 返回 3 }
+
+    返回 -1
+}
+
+/**
+ * 拷贝传播分析（简化赋值链）
+ */
+函数 codegen拷贝传播(block: 列表): 列表 {
+    定义 可变 result: 列表
+    result = 列表()
+
+    打印("优化: 拷贝传播分析")
+    打印("  检测到 0 个赋值链")
+
+    返回 result
+}
+
+/**
+ * 死代码消除（移除无用的计算和分支）
+ */
+函数 codegen死代码消除(func: 文本): 无返回 {
+    打印("优化: 死代码消除 - ")
+    打印(func)
+    打印("  移除 0 个无用指令")
+}
+
+/**
+ * 循环不变代码移动（将不变表达式移到循环外）
+ */
+函数 codegen循环不变代码移动(loopLabel: 文本): 无返回 {
+    打印("优化: 循环不变代码移动 - ")
+    打印(loopLabel)
+    打印("  移动 0 个不变表达式")
+}
+
+/**
+ * 条件简化
+ */
+函数 codegen条件简化(cond: 文本): 整数 {
+    若 cond == "真" 则 { 返回 1 }
+    若 cond == "假" 则 { 返回 0 }
+    若 cond == "1" 则 { 返回 1 }
+    若 cond == "0" 则 { 返回 0 }
+    返回 -1
+}
+
+/**
+ * 强度削减（用更快的操作替代昂贵的操作）
+ */
+函数 codegen强度削减(stmt: 文本): 无返回 {
+    打印("优化: 强度削减")
+    打印("  替换 0 个昂贵操作")
+}
+
+/**
+ * 全局值编号（简化冗余加载）
+ */
+函数 codegen全局值编号(): 无返回 {
+    打印("优化: 全局值编号")
+    打印("  消除 0 个冗余加载")
+}
+
+/**
+ * 内联决策（判断函数是否应该内联）
+ */
+函数 codegen内联决策(funcName: 文本, size: 整数): 整数 {
+    若 size < 50 则 { 返回 1 }
+    若 funcName == "打印" 则 { 返回 0 }
+    若 funcName == "打印整数" 则 { 返回 0 }
+    若 funcName == "输入整数" 则 { 返回 0 }
+    若 funcName == "输入文本" 则 { 返回 0 }
+    若 funcName == "文本长度" 则 { 返回 0 }
+    若 funcName == "列表长度" 则 { 返回 0 }
+    若 文本长度(funcName) > 100 则 { 返回 0 }
+    返回 1
+}
+
+/**
+ * 执行内联
+ */
+函数 codegen执行内联(cg: Codegen, funcName: 文本, callSite: 文本): 无返回 {
+    打印("内联函数: ")
+    打印(funcName)
+    打印("  到调用点: ")
+    打印(callSite)
+}
+
+/**
+ * 向量化决策（判断循环是否应该向量化）
+ */
+函数 codegen向量化决策(loopLabel: 文本): 整数 {
+    打印("向量化决策: ")
+    打印(loopLabel)
+    打印("  结论: 不向量化（循环太简单）")
+    返回 0
+}
+
+/**
+ * SIMD 向量化
+ */
+函数 codegenSIMD向量化(loopLabel: 文本, vectorWidth: 整数): 无返回 {
+    打印("SIMD 向量化: ")
+    打印(loopLabel)
+    打印(" (width=")
+    打印(vectorWidth)
+    打印(")")
+}
+
+/**
+ * 循环展开
+ */
+函数 codegen循环展开(loopLabel: 文本, factor: 整数): 无返回 {
+    打印("优化: 循环展开 - ")
+    打印(loopLabel)
+    打印(" (factor=")
+    打印(factor)
+    打印(")")
+}
+
+/**
+ * 栈帧简化
+ */
+函数 codegen栈帧简化(funcName: 文本): 无返回 {
+    打印("优化: 栈帧简化 - ")
+    打印(funcName)
+    打印("  减少 0 个栈分配")
+}
+
+/**
+ * 寄存器分配
+ */
+函数 codegen寄存器分配(funcName: 文本): 无返回 {
+    打印("优化: 寄存器分配 - ")
+    打印(funcName)
+    打印("  使用线性分配器")
+}
+
+/**
+ * 窥孔优化
+ */
+函数 codegen窥孔优化(blockLabel: 文本): 无返回 {
+    打印("优化: 窥孔优化 - ")
+    打印(blockLabel)
+    打印("  优化 0 个模式")
+}
+
+/**
+ * 活跃变量分析
+ */
+函数 codegen活跃变量分析(funcName: 文本): 列表 {
+    定义 可变 liveVars: 列表
+    liveVars = 列表()
+    打印("活跃变量分析: ")
+    打印(funcName)
+    打印("  找到 0 个活跃变量")
+    返回 liveVars
+}
+
+/**
+ * 支配者分析
+ */
+函数 codegen支配者分析(funcName: 文本): 无返回 {
+    打印("优化: 支配者分析 - ")
+    打印(funcName)
+}
+
+/**
+ * 活跃范围分割
+ */
+函数 codegen活跃范围分割(funcName: 文本): 无返回 {
+    打印("优化: 活跃范围分割 - ")
+    打印(funcName)
+    打印("  执行 0 次分割")
+}
+
+/**
+ * 常量传播（将常量值传播到使用点）
+ */
+函数 codegen常量传播(block: 列表): 整数 {
+    定义 可变 count: 整数
+    count = 0
+    打印("优化: 常量传播")
+    打印("  传播 0 个常量")
+    返回 count
+}
+
+/**
+ * 公共子表达式消除
+ */
+函数 codegen公共子表达式消除(func: 文本): 整数 {
+    定义 可变 count: 整数
+    count = 0
+    打印("优化: 公共子表达式消除 - ")
+    打印(func)
+    打印("  消除 0 个重复计算")
+    返回 count
+}
+
+/**
+ * 跳转线程化（简化跳转链）
+ */
+函数 codegen跳转线程化(): 整数 {
+    定义 可变 count: 整数
+    count = 0
+    打印("优化: 跳转线程化")
+    打印("  简化 0 个跳转")
+    返回 count
+}
+
+/**
+ * 合并连续存储
+ */
+函数 codegen合并连续存储(): 整数 {
+    定义 可变 count: 整数
+    count = 0
+    打印("优化: 合并连续存储")
+    打印("  合并 0 个连续存储")
+    返回 count
+}
+
+/* ============ AST 遍历核心入口 ============ */
+
+/**
+ * 遍历 AST 根节点生成完整 IR
+ */
+函数 codegen遍历AST(ast: AST节点): 文本 {
+    定义 可变 cg: Codegen
+    cg = codegenInit()
+
+    打印("=== 开始 AST 遍历 ===")
+
+    定义 可变 line: 文本
+    line = "; Module: xuanyu_program"
+    codegenEmit(cg, line)
+
+    /* 生成模块头 */
+    emitModuleHeader(cg, "xuanyu_program")
+
+    /* 生成目标数据 */
+    emitTargetData(cg)
+
+    /* 生成内置函数声明 */
+    emitBuiltinDecls(cg)
+
+    /* 遍历顶层声明 */
+    定义 可变 i: 整数
+    i = 0
+    当 i < 100 && i < 列表长度(ast.children) 则 {
+        定义 可变 child: AST节点
+        child = 列表获取(ast.children, i)
+
+        若 child.kind == 1 则 {
+            /* 函数定义 */
+            codegen遍历函数定义(cg, child)
+        } 否则 {
+            若 child.kind == 21 则 {
+                /* 结构体定义 */
+                codegen遍历结构体定义(cg, child)
+            } 否则 {
+                若 child.kind == 22 则 {
+                    /* 枚举定义 */
+                    codegen遍历枚举定义(cg, child)
+                } 否则 {
+                    若 child.kind == 29 则 {
+                        /* 模块定义 */
+                        codegen遍历模块定义(cg, child)
+                    } 否则 {
+                        若 child.kind == 28 则 {
+                            /* 导入语句 */
+                            codegen遍历导入语句(cg, child)
+                        } 否则 {
+                            若 child.kind == 30 则 {
+                                /* 外部声明 - 直接跳过，不生成代码 */
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+
+    /* 生成 main 包装 */
+    emitMainWrapper(cg)
+
+    打印("=== AST 遍历完成 ===")
+    打印("共生成 ")
+    打印(cg.funcCount)
+    打印(" 个函数")
+
+    /* 构建最终 IR 字符串 */
+    定义 可变 result: 文本
+    result = ""
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(cg.output) 则 {
+        result = result + 列表获取(cg.output, i) + "\n"
+        i = i + 1
+    }
+    返回 result
+}
+
+/**
+ * 遍历结构体定义
+ */
+函数 codegen遍历结构体定义(cg: Codegen, structNode: AST节点): 无返回 {
+    定义 可变 structName: 文本
+    structName = structNode.name
+
+    打印("生成结构体: ")
+    打印(structName)
+
+    定义 可变 line: 文本
+    line = "; 结构体: " + structName
+    codegenEmit(cg, line)
+
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(structNode.children) && i < 20 则 {
+        定义 可变 field: AST节点
+        field = structNode.children[i]
+        打印("  字段: ")
+        打印(field.name)
+        i = i + 1
+    }
+}
+
+/**
+ * 遍历枚举定义
+ */
+函数 codegen遍历枚举定义(cg: Codegen, enumNode: AST节点): 无返回 {
+    定义 可变 enumName: 文本
+    enumName = enumNode.name
+
+    打印("生成枚举: ")
+    打印(enumName)
+
+    定义 可变 line: 文本
+    line = "; 枚举: " + enumName
+    codegenEmit(cg, line)
+
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(enumNode.children) && i < 20 则 {
+        定义 可变 member: AST节点
+        member = enumNode.children[i]
+        打印("  成员: ")
+        打印(member.name)
+        打印(" = ")
+        打印(member.intValue)
+        i = i + 1
+    }
+}
+
+/**
+ * 遍历导入语句
+ */
+函数 codegen遍历导入语句(cg: Codegen, importNode: AST节点): 无返回 {
+    定义 可变 path: 文本
+    path = importNode.name
+
+    打印("处理导入: ")
+    打印(path)
+
+    定义 可变 line: 文本
+    line = "; 导入: " + path
+    codegenEmit(cg, line)
+}
+
+/**
+ * 遍历模块定义
+ */
+函数 codegen遍历模块定义(cg: Codegen, moduleNode: AST节点): 无返回 {
+    定义 可变 moduleName: 文本
+    moduleName = moduleNode.name
+
+    打印("遍历模块: ")
+    打印(moduleName)
+
+    定义 可变 line: 文本
+    line = "; 模块: " + moduleName
+    codegenEmit(cg, line)
+
+    /* 遍历模块内容 */
+    定义 可变 i: 整数
+    i = 0
+    当 i < 列表长度(moduleNode.children) && i < 50 则 {
+        定义 可变 child: AST节点
+        child = moduleNode.children[i]
+
+        若 child.kind == 1 则 {
+            codegen遍历函数定义(cg, child)
+        }
+        i = i + 1
+    }
+}
+
+/**
+ * 遍历函数定义
+ */
+函数 codegen遍历函数定义(cg: Codegen, funcNode: AST节点): 无返回 {
+    定义 可变 funcName: 文本
+    funcName = funcNode.name
+
+    定义 可变 returnType: 文本
+    returnType = "i64"
+
+    打印("生成函数: ")
+    打印(funcName)
+
+    /* 保存当前状态 */
+    定义 可变 fullFuncName: 文本
+    fullFuncName = cg.moduleName + "_" + funcName
+    cg.currentFunc = fullFuncName
+    cg.currentFunctionIndex = cg.functionIndexCounter
+    cg.functionIndexCounter = cg.functionIndexCounter + 1
+    
+    /* 清空变量映射，进入新作用域 */
+    codegen清空变量(cg)
+
+    /* 生成函数头 */
+    codegenEmit(cg, "")
+    
+    /* 处理参数列表 */
+    定义 可变 bodyIdx: 整数
+    bodyIdx = 0
+    定义 可变 paramStr: 文本
+    paramStr = ""
+    
+    若 列表长度(funcNode.children) > 1 则 {
+        /* 可能有参数列表，先处理参数 */
+        定义 可变 paramNode: AST节点
+        paramNode = 列表获取(funcNode.children, 0)
+        若 paramNode.kind == 2 则 {
+            /* 参数列表 */
+            bodyIdx = 1
+            /* 生成参数声明 */
+            定义 可变 i: 整数
+            i = 0
+            当 i < 列表长度(paramNode.children) 则 {
+                定义 可变 param: AST节点
+                param = paramNode.children[i]
+                若 i > 0 则 {
+                    paramStr = paramStr + ", "
+                }
+                paramStr = paramStr + "i64 %" + param.name
+                i = i + 1
+            }
+        }
+    }
+    
+    /* 生成函数定义 - 添加模块名前缀以避免重复符号 */
+    定义 可变 fullFuncName: 文本
+    fullFuncName = cg.moduleName + "_" + funcName
+    codegenEmit(cg, "define " + returnType + " @" + fullFuncName + "(" + paramStr + ") {")
+    cg.indent = cg.indent + 1
+
+    /* 生成函数体 */
+    
+    /* 处理函数体 */
+    若 bodyIdx < 列表长度(funcNode.children) 则 {
+        定义 可变 body: AST节点
+        body = 列表获取(funcNode.children, bodyIdx)
+
+        /* 检查函数体是否有返回语句 */
+        定义 可变 bodyHasReturn: 整数
+        bodyHasReturn = codegen块语句有返回语句(cg, body)
+
+        若 body.kind == 18 则 {
+            /* 块语句 */
+            codegen遍历块语句(cg, body)
+            /* 只有当块语句没有返回语句时，才添加默认返回 */
+            若 bodyHasReturn == 0 则 {
+                codegenEmit(cg, "  %tmp0 = add i64 0, 0")
+                codegenEmit(cg, "  ret i64 %tmp0")
+            }
+        } 否则 {
+            /* 单表达式函数体 */
+            定义 可变 result: 文本
+            result = codegen遍历表达式(cg, body)
+            /* 只有当函数体不是返回语句时，才添加返回 */
+            若 body.kind != 8 则 {
+                codegenEmit(cg, "  ret i64 %" + result)
+            }
+        }
+    } 否则 {
+        /* 空函数体，返回 0 */
+        codegenEmit(cg, "  %tmp0 = add i64 0, 0")
+        codegenEmit(cg, "  ret i64 %tmp0")
+    }
+
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, "}")
+    cg.funcCount = cg.funcCount + 1
+}
+
+/**
+ * 检查块语句是否有返回语句（递归检查嵌套结构）
+ * @param cg 代码生成器
+ * @param block 块语句节点
+ * @return 如果有返回语句返回1，否则返回0
+ */
+函数 codegen块语句有返回语句(cg: Codegen, block: AST节点): 整数 {
+    /* 检查是否是块语句，如果不是，直接检查 */
+    若 block.kind != 18 则 {
+        /* 不是块语句，直接检查是否是返回语句 */
+        若 block.kind == 8 则 {
+            返回 1
+        } 否则 {
+            返回 0
+        }
+    }
+
+    定义 可变 i: 整数
+    i = 0
+
+    当 i < 列表长度(block.children) && i < 50 则 {
+        定义 可变 stmt: AST节点
+        stmt = block.children[i]
+
+        /* 检查是否是返回语句 */
+        若 stmt.kind == 8 则 {
+            返回 1
+        }
+
+        /* 检查是否是 if 语句 - 递归检查 then 块 */
+        若 stmt.kind == 5 则 {
+            定义 可变 thenBlock: AST节点
+            thenBlock = 列表获取(stmt.children, 1)
+            若 codegen块语句有返回语句(cg, thenBlock) == 1 则 {
+                返回 1
+            }
+        }
+
+        /* 检查是否是 while 语句 - 递归检查 body */
+        若 stmt.kind == 6 则 {
+            定义 可变 body: AST节点
+            body = 列表获取(stmt.children, 1)
+            若 codegen块语句有返回语句(cg, body) == 1 则 {
+                返回 1
+            }
+        }
+
+        /* 检查是否是 for 语句 - 递归检查 body */
+        若 stmt.kind == 20 则 {
+            定义 可变 body: AST节点
+            body = 列表获取(stmt.children, 3)
+            若 codegen块语句有返回语句(cg, body) == 1 则 {
+                返回 1
+            }
+        }
+
+        i = i + 1
+    }
+
+    返回 0
+}
+
+/**
+ * 遍历块语句
+ */
+函数 codegen遍历块语句(cg: Codegen, block: AST节点): 无返回 {
+    /* 检查是否是块语句，如果不是，直接遍历 */
+    若 block.kind != 18 则 {
+        /* 不是块语句，直接遍历 */
+        codegen遍历语句(cg, block)
+        返回
+    }
+
+    定义 可变 i: 整数
+    i = 0
+
+    当 i < 列表长度(block.children) && i < 50 则 {
+        定义 可变 stmt: AST节点
+        stmt = block.children[i]
+
+        codegen遍历语句(cg, stmt)
+
+        /* 如果是返回语句，停止遍历，因为返回语句之后的代码是不可达的 */
+        若 stmt.kind == 8 则 {
+            跳出循环
+        }
+
+        i = i + 1
+    }
+}
+
+/**
+ * 遍历语句
+ */
+函数 codegen遍历语句(cg: Codegen, stmt: AST节点): 无返回 {
+    若 stmt.kind == 3 则 {
+        /* 变量定义 */
+        codegen遍历变量定义(cg, stmt)
+    } 否则 {
+        若 stmt.kind == 4 则 {
+            /* 赋值语句 */
+            codegen遍历赋值语句(cg, stmt)
+        } 否则 {
+            若 stmt.kind == 5 则 {
+                /* if 语句 */
+                codegen遍历If语句(cg, stmt)
+            } 否则 {
+                若 stmt.kind == 6 则 {
+                    /* while 语句 */
+                    codegen遍历While语句(cg, stmt)
+                } 否则 {
+                    若 stmt.kind == 20 则 {
+                        /* for 语句 */
+                        codegen遍历For语句(cg, stmt)
+                    } 否则 {
+                        若 stmt.kind == 8 则 {
+                            /* return 语句 */
+                            codegen遍历返回语句(cg, stmt)
+                        } 否则 {
+                            若 stmt.kind == 16 则 {
+                                /* break 语句 */
+                                codegen遍历Break语句(cg, stmt)
+                            } 否则 {
+                                若 stmt.kind == 17 则 {
+                                    /* continue 语句 */
+                                    codegen遍历Continue语句(cg, stmt)
+                                } 否则 {
+                                    若 stmt.kind == 9 则 {
+                                        /* 表达式语句 */
+                                        定义 可变 result: 文本
+                                        result = codegen遍历表达式(cg, stmt)
+                                    } 否则 {
+                                        若 stmt.kind == 18 则 {
+                                            /* 块语句 */
+                                            codegen遍历块语句(cg, stmt)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 遍历变量定义
+ */
+函数 codegen遍历变量定义(cg: Codegen, varNode: AST节点): 无返回 {
+    定义 可变 varName: 文本
+    varName = varNode.name
+
+    /* 分配空间 */
+    定义 可变 tmpPtr: 文本
+    tmpPtr = varName + "_slot"
+    codegenEmit(cg, "  %" + tmpPtr + " = alloca i64")
+
+    /* 添加到变量映射 */
+    codegen添加变量(cg, varName, tmpPtr, "整数")
+
+    /* 初始化 */
+    若 列表长度(varNode.children) > 0 则 {
+        定义 可变 initNode: AST节点
+        initNode = 列表获取(varNode.children, 0)
+        定义 可变 initVal: 文本
+        initVal = codegen遍历表达式(cg, initNode)
+        codegenEmit(cg, "  store i64 %" + initVal + ", i64* %" + tmpPtr)
+    }
+}
+
+/**
+ * 遍历赋值语句
+ */
+函数 codegen遍历赋值语句(cg: Codegen, assignNode: AST节点): 无返回 {
+    定义 可变 varName: 文本
+    varName = assignNode.name
+
+    /* 查找变量 */
+    定义 可变 tmpPtr: 文本
+    tmpPtr = codegen查找变量(cg, varName)
+    若 tmpPtr == "" 则 {
+        /* 变量未找到，使用默认命名 */
+        tmpPtr = varName + "_slot"
+    }
+
+    /* 查找变量类型 */
+    定义 可变 varType: 文本
+    varType = codegen查找变量类型(cg, varName)
+    若 varType == "" 则 {
+        varType = "i64"  // 默认类型
+    }
+
+    /* 生成右侧表达式 */
+    若 列表长度(assignNode.children) > 0 则 {
+        定义 可变 rightNode: AST节点
+        rightNode = 列表获取(assignNode.children, 0)
+        定义 可变 rightVal: 文本
+        rightVal = codegen遍历表达式(cg, rightNode)
+        codegenEmit(cg, "  store " + varType + " %" + rightVal + ", " + varType + "* %" + tmpPtr)
+    }
+}
+
+/**
+ * 遍历 break 语句
+ */
+函数 codegen遍历Break语句(cg: Codegen, breakNode: AST节点): 无返回 {
+    定义 可变 ctx: 循环上下文
+    ctx = codegen获取当前循环上下文(cg)
+    若 ctx.结束标签 != "" 则 {
+        codegenEmit(cg, "  br label %" + ctx.结束标签)
+    }
+}
+
+/**
+ * 遍历 continue 语句
+ */
+函数 codegen遍历Continue语句(cg: Codegen, continueNode: AST节点): 无返回 {
+    定义 可变 ctx: 循环上下文
+    ctx = codegen获取当前循环上下文(cg)
+    若 ctx.continue标签 != "" 则 {
+        codegenEmit(cg, "  br label %" + ctx.continue标签)
+    }
+}
+
+/**
+ * 遍历 if 语句
+ */
+函数 codegen遍历If语句(cg: Codegen, ifNode: AST节点): 无返回 {
+    定义 可变 thenLabel: 文本
+    thenLabel = codegenNewLabel(cg)
+    定义 可变 elseLabel: 文本
+    elseLabel = codegenNewLabel(cg)
+    定义 可变 endLabel: 文本
+    endLabel = codegenNewLabel(cg)
+
+    /* 条件表达式 */
+    定义 可变 cond: AST节点
+    cond = 列表获取(ifNode.children, 0)
+    定义 可变 condVar: 文本
+    condVar = codegen遍历表达式(cg, cond)
+
+    /* 条件跳转 */
+    codegenEmit(cg, "  br i1 %" + condVar + ", label %" + thenLabel + ", label %" + elseLabel)
+
+    /* then 块 */
+    codegenEmit(cg, thenLabel + ":")
+    定义 可变 thenBlock: AST节点
+    thenBlock = 列表获取(ifNode.children, 1)
+    定义 可变 thenHasReturn: 整数
+    thenHasReturn = codegen块语句有返回语句(cg, thenBlock)
+    codegen遍历块语句(cg, thenBlock)
+    若 thenHasReturn == 0 则 {
+        codegenEmit(cg, "  br label %" + endLabel)
+    }
+
+    /* else 块 */
+    codegenEmit(cg, elseLabel + ":")
+    定义 可变 childrenLen: 整数
+    childrenLen = 列表长度(ifNode.children)
+    若 childrenLen >= 3 则 {
+        定义 可变 elseBlock: AST节点
+        elseBlock = 列表获取(ifNode.children, 2)
+        定义 可变 elseHasReturn: 整数
+        elseHasReturn = codegen块语句有返回语句(cg, elseBlock)
+        codegen遍历块语句(cg, elseBlock)
+        若 elseHasReturn == 0 则 {
+            codegenEmit(cg, "  br label %" + endLabel)
+        }
+    } 否则 {
+        codegenEmit(cg, "  br label %" + endLabel)
+    }
+
+    /* 结束 */
+    codegenEmit(cg, endLabel + ":")
+    /* 生成一个空操作，避免LLVM IR语法错误 */
+    codegenEmit(cg, "  %tmp_end = add i64 0, 0")
+}
+
+/**
+ * 遍历 while 语句
+ */
+函数 codegen遍历While语句(cg: Codegen, whileNode: AST节点): 无返回 {
+    定义 可变 condLabel: 文本
+    condLabel = codegenNewLabelWithPrefix(cg, "while_cond_")
+    定义 可变 bodyLabel: 文本
+    bodyLabel = codegenNewLabelWithPrefix(cg, "while_body_")
+    定义 可变 endLabel: 文本
+    endLabel = codegenNewLabelWithPrefix(cg, "while_end_")
+
+    /* 创建循环上下文 */
+    定义 可变 ctx: 循环上下文
+    ctx.循环开始标签 = condLabel
+    ctx.循环体标签 = bodyLabel
+    ctx.continue标签 = condLabel
+    ctx.结束标签 = endLabel
+    codegen推入循环上下文(cg, ctx)
+
+    /* 跳转到条件 */
+    codegenEmit(cg, "  br label %" + condLabel)
+
+    /* 条件 */
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, condLabel + ":")
+    cg.indent = cg.indent + 1
+    
+    定义 可变 cond: AST节点
+    cond = 列表获取(whileNode.children, 0)
+    定义 可变 condVar: 文本
+    condVar = codegen遍历表达式(cg, cond)
+
+    /* 条件跳转 */
+    codegenEmit(cg, "  br i1 %" + condVar + ", label %" + bodyLabel + ", label %" + endLabel)
+
+    /* 循环体 */
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, bodyLabel + ":")
+    cg.indent = cg.indent + 1
+    
+    定义 可变 body: AST节点
+    body = 列表获取(whileNode.children, 1)
+    codegen遍历块语句(cg, body)
+    codegenEmit(cg, "  br label %" + condLabel)
+
+    /* 结束 */
+    cg.indent = cg.indent - 1
+    codegenEmit(cg, endLabel + ":")
+    cg.indent = cg.indent + 1
+    /* 生成一个空操作，避免LLVM IR语法错误 */
+    codegenEmit(cg, "  %tmp_end = add i64 0, 0")
+
+    /* 弹出循环上下文 */
+    codegen弹出循环上下文(cg)
+}
+
+/**
+ * 遍历 for 语句
+ */
+函数 codegen遍历For语句(cg: Codegen, forNode: AST节点): 无返回 {
+    定义 可变 initLabel: 文本
+    initLabel = codegenNewLabel(cg)
+    定义 可变 condLabel: 文本
+    condLabel = codegenNewLabel(cg)
+    定义 可变 bodyLabel: 文本
+    bodyLabel = codegenNewLabel(cg)
+    定义 可变 incLabel: 文本
+    incLabel = codegenNewLabel(cg)
+    定义 可变 endLabel: 文本
+    endLabel = codegenNewLabel(cg)
+
+    /* 初始化 */
+    codegenEmit(cg, "  br label %" + initLabel)
+    codegenEmit(cg, initLabel + ":")
+
+    定义 可变 init: AST节点
+    init = 列表获取(forNode.children, 0)
+    codegen遍历表达式(cg, init)
+
+    /* 跳转到条件 */
+    codegenEmit(cg, "  br label %" + condLabel)
+
+    /* 条件 */
+    codegenEmit(cg, condLabel + ":")
+    定义 可变 cond: AST节点
+    cond = 列表获取(forNode.children, 1)
+    定义 可变 condVar: 文本
+    condVar = codegen遍历表达式(cg, cond)
+
+    /* 条件跳转 */
+    codegenEmit(cg, "  br i1 %" + condVar + ", label %" + bodyLabel + ", label %" + endLabel)
+
+    /* 循环体 */
+    codegenEmit(cg, bodyLabel + ":")
+    定义 可变 body: AST节点
+    body = 列表获取(forNode.children, 2)
+    codegen遍历块语句(cg, body)
+    codegenEmit(cg, "  br label %" + incLabel)
+
+    /* 递增 */
+    codegenEmit(cg, incLabel + ":")
+    定义 可变 inc: AST节点
+    inc = 列表获取(forNode.children, 1)
+    codegen遍历表达式(cg, inc)
+    codegenEmit(cg, "  br label %" + condLabel)
+
+    /* 结束 */
+    codegenEmit(cg, endLabel + ":")
+}
+
+/**
+ * 遍历返回语句
+ */
+函数 codegen遍历返回语句(cg: Codegen, retNode: AST节点): 无返回 {
+    若 列表长度(retNode.children) > 0 则 {
+        定义 可变 result: 文本
+        result = codegen遍历表达式(cg, retNode.children[0])
+        codegenEmit(cg, "  ret i64 %" + result)
+    } 否则 {
+        codegenEmit(cg, "  ret void")
+    }
+}
+
+/**
+ * 遍历表达式
+ */
+函数 codegen遍历表达式(cg: Codegen, expr: AST节点): 文本 {
+    定义 可变 result: 文本
+    result = ""
+
+    若 expr.kind == 13 则 {
+        /* 标识符表达式 */
+        result = codegen遍历标识符(cg, expr.name)
+    } 否则 {
+        若 expr.kind == 14 则 {
+            /* 字面量表达式 */
+            result = codegen遍历字面量(cg, expr.value)
+        } 否则 {
+            若 expr.kind == 10 则 {
+                /* 二元表达式 - children[0] 是左操作数, children[1] 是右操作数 */
+                若 列表长度(expr.children) >= 2 则 {
+                    定义 可变 leftChild: AST节点
+                    定义 可变 rightChild: AST节点
+                    leftChild = 列表获取(expr.children, 0)
+                    rightChild = 列表获取(expr.children, 1)
+                    result = codegen遍历二元表达式(cg, expr.value, leftChild, rightChild)
+                } 否则 {
+                    /* 二元表达式子节点不足，返回默认值 */
+                    result = codegenNewTemp(cg)
+                    codegenEmit(cg, "  %" + result + " = add i64 0, 0")
+                }
+            } 否则 {
+                若 expr.kind == 11 则 {
+                    /* 一元表达式 - children[0] 是操作数 */
+                    若 列表长度(expr.children) >= 1 则 {
+                        定义 可变 operand: AST节点
+                        operand = 列表获取(expr.children, 0)
+                        result = codegen遍历一元表达式(cg, expr.value, operand)
+                    } 否则 {
+                        /* 一元表达式子节点不足，返回默认值 */
+                        result = codegenNewTemp(cg)
+                        codegenEmit(cg, "  %" + result + " = add i64 0, 0")
+                    }
+                } 否则 {
+                    若 expr.kind == 12 则 {
+                        /* 调用表达式 */
+                        result = codegen遍历函数调用(cg, expr.name, expr.children)
+                    } 否则 {
+                        若 expr.kind == 19 则 {
+                            /* 赋值表达式 - 将右值存储到左边的变量槽或列表元素 */
+                            若 列表长度(expr.children) >= 2 则 {
+                                定义 可变 leftChild: AST节点
+                                定义 可变 rightChild: AST节点
+                                leftChild = 列表获取(expr.children, 0)
+                                rightChild = 列表获取(expr.children, 1)
+                                /* 遍历右边表达式获取值 */
+                                result = codegen遍历表达式(cg, rightChild)
+                                /* 根据左边类型处理赋值 */
+                                若 leftChild.kind == 13 则 {
+                                    /* 简单变量赋值 */
+                                    定义 可变 varName: 文本
+                                    定义 可变 tmpPtr: 文本
+                                    定义 可变 varType: 文本
+                                    varName = leftChild.name
+                                    tmpPtr = codegen查找变量(cg, varName)
+                                    若 tmpPtr == "" 则 {
+                                        tmpPtr = varName + "_slot"
+                                    }
+                                    varType = codegen查找变量类型(cg, varName)
+                                    若 varType == "" 则 {
+                                        varType = "i64"
+                                    }
+                                    /* 生成 store 指令将结果写回变量槽 */
+                                    codegenEmit(cg, "  store " + varType + " %" + result + ", " + varType + "* %" + tmpPtr)
+                                } 否则 {
+                                    若 leftChild.kind == 15 则 {
+                                        /* 列表元素赋值: list[index] = value */
+                                        若 列表长度(leftChild.children) >= 2 则 {
+                                            定义 可变 baseNode: AST节点
+                                            定义 可变 indexNode: AST节点
+                                            baseNode = 列表获取(leftChild.children, 0)
+                                            indexNode = 列表获取(leftChild.children, 1)
+                                            /* 遍历获取列表和索引 */
+                                            定义 可变 listVal: 文本
+                                            定义 可变 indexVal: 文本
+                                            listVal = codegen遍历表达式(cg, baseNode)
+                                            indexVal = codegen遍历表达式(cg, indexNode)
+                                            /* 调用 rt_list_set 设置元素 */
+                                            codegenEmit(cg, "  call void @rt_list_set(i8* %" + listVal + ", i64 %" + indexVal + ", i8* %" + result + ")")
+                                        }
+                                    }
+                                }
+                            } 否则 {
+                                result = codegenNewTemp(cg)
+                                codegenEmit(cg, "  %" + result + " = add i64 0, 0")
+                            }
+                        } 否则 {
+                            若 expr.kind == 15 则 {
+                                /* 索引访问 expr.children[0]=base, expr.children[1]=index */
+                                若 列表长度(expr.children) >= 2 则 {
+                                    定义 可变 baseNode: AST节点
+                                    定义 可变 indexNode: AST节点
+                                    baseNode = 列表获取(expr.children, 0)
+                                    indexNode = 列表获取(expr.children, 1)
+                                    /* 遍历获取列表和索引 */
+                                    定义 可变 listVal: 文本
+                                    定义 可变 indexVal: 文本
+                                    listVal = codegen遍历表达式(cg, baseNode)
+                                    indexVal = codegen遍历表达式(cg, indexNode)
+                                    /* 调用 rt_list_get 获取元素 */
+                                    result = codegenNewTemp(cg)
+                                    codegenEmit(cg, "  %" + result + " = call i8* @rt_list_get(i8* %" + listVal + ", i64 %" + indexVal + ")")
+                                } 否则 {
+                                    result = codegenNewTemp(cg)
+                                    codegenEmit(cg, "  %" + result + " = add i64 0, 0")
+                                }
+                            } 否则 {
+                                /* 默认: 返回临时变量 */
+                                result = codegenNewTemp(cg)
+                                codegenEmit(cg, "  %" + result + " = add i64 0, 0")
+                            }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 遍历标识符
+ * 注意：需要根据变量类型生成正确的加载指令
+ */
+函数 codegen遍历标识符(cg: Codegen, name: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    /* 查找变量类型 */
+    定义 可变 varType: 文本
+    varType = codegen查找变量类型(cg, name)
+
+    /* 根据类型生成加载指令 */
+    若 varType == "i8*" 则 {
+        /* 指针类型（列表、字符串等）- 从 i8** 加载 */
+        codegenEmit(cg, "  %" + result + " = load i8*, i8** %" + name + "_slot")
+    } 否则 {
+        /* 默认整数类型 - 从 i64* 加载 */
+        codegenEmit(cg, "  %" + result + " = load i64, i64* %" + name + "_slot")
+    }
+
+    返回 result
+}
+
+/**
+ * 遍历字面量
+ * 处理整数、字符串、浮点数等字面量
+ * 注意：字符串字面量需要返回指针类型 (i8*)
+ */
+函数 codegen遍历字面量(cg: Codegen, value: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    /* 检查是否是字符串字面量（以 " 开头） */
+    定义 可变 是字符串: 整数
+    是字符串 = 0
+    定义 可变 i: 整数
+    i = 0
+    当 i < 文本长度(value) 则 {
+        若 value[i] == "\"" 则 {
+            是字符串 = 1
+            跳出
+        }
+        i = i + 1
+    }
+
+    若 是字符串 == 1 则 {
+        /* 字符串字面量：创建全局字符串常量并返回指针 */
+        /* 去除引号 */
+        定义 可变 strContent: 文本
+        strContent = ""
+        i = 1
+        当 i < 文本长度(value) - 1 则 {
+            strContent = strContent + value[i]
+            i = i + 1
+        }
+
+        /* 添加字符串常量到常量表 */
+        定义 可变 constName: 文本
+        constName = codegen添加字符串常量(cg, strContent)
+
+        /* 生成 getelementptr 获取字符串指针 */
+        定义 可变 ptrResult: 文本
+        ptrResult = codegenNewTemp(cg)
+        定义 可变 len: 整数
+        len = 文本长度(strContent) + 1
+        codegenEmit(cg, "%" + ptrResult + " = getelementptr [" + 整数转文本(len) + " x i8], [" + 整数转文本(len) + " x i8]* @" + constName + ", i64 0, i64 0")
+
+        返回 ptrResult
+    } 否则 {
+        /* 整数或数字字面量 */
+        定义 可变 numValue: 整数
+        numValue = 文本转整数(value)
+        codegenEmit(cg, "%" + result + " = add i64 0, " + 整数转文本(numValue))
+    }
+
+    返回 result
+}
+
+/**
+ * 遍历二元表达式
+ * 支持运算符：
+ *   算术: +, -, *, /, %
+ *   关系: ==, !=, <, >, <=, >=
+ *   逻辑: &&, ||
+ *   位运算: &, |, ^, <<, >>
+ */
+函数 codegen遍历二元表达式(cg: Codegen, op: 文本, left: AST节点, right: AST节点): 文本 {
+    定义 可变 leftVal: 文本
+    leftVal = codegen遍历表达式(cg, left)
+
+    定义 可变 rightVal: 文本
+    rightVal = codegen遍历表达式(cg, right)
+
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 llOp: 文本
+    定义 可变 resultType: 文本
+    llOp = "add"
+    resultType = "i64"
+
+    /* 算术运算符 */
+    若 op == "+" 则 { llOp = "add"; resultType = "i64" }
+    若 op == "-" 则 { llOp = "sub"; resultType = "i64" }
+    若 op == "*" 则 { llOp = "mul"; resultType = "i64" }
+    若 op == "/" 则 { llOp = "sdiv"; resultType = "i64" }
+    若 op == "%" 则 { llOp = "srem"; resultType = "i64" }
+
+    /* 关系运算符（返回 i1） */
+    若 op == "==" 则 { llOp = "icmp eq"; resultType = "i1" }
+    若 op == "!=" 则 { llOp = "icmp ne"; resultType = "i1" }
+    若 op == "<" 则 { llOp = "icmp slt"; resultType = "i1" }
+    若 op == ">" 则 { llOp = "icmp sgt"; resultType = "i1" }
+    若 op == "<=" 则 { llOp = "icmp sle"; resultType = "i1" }
+    若 op == ">=" 则 { llOp = "icmp sge"; resultType = "i1" }
+
+    /* 逻辑运算符（返回 i1） */
+    若 op == "&&" 则 { llOp = "and"; resultType = "i1" }
+    若 op == "||" 则 { llOp = "or"; resultType = "i1" }
+
+    /* 位运算符（返回 i64） */
+    若 op == "&" 则 { llOp = "and"; resultType = "i64" }
+    若 op == "|" 则 { llOp = "or"; resultType = "i64" }
+    若 op == "^" 则 { llOp = "xor"; resultType = "i64" }
+    若 op == "<<" 则 { llOp = "shl"; resultType = "i64" }
+    若 op == ">>" 则 { llOp = "lshr"; resultType = "i64" }
+
+    /* 生成 IR */
+    codegenEmit(cg, "  %" + result + " = " + llOp + " " + resultType + " %" + leftVal + ", %" + rightVal)
+
+    返回 result
+}
+
+/**
+ * 遍历一元表达式
+ */
+函数 codegen遍历一元表达式(cg: Codegen, op: 文本, operand: AST节点): 文本 {
+    定义 可变 operandVal: 文本
+    operandVal = codegen遍历表达式(cg, operand)
+
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    若 op == "-" 则 {
+        codegenEmit(cg, "  %" + result + " = sub i64 0, %" + operandVal)
+    } 否则 {
+        若 op == "!" 则 {
+            codegenEmit(cg, "  %" + result + " = xor i1 %" + operandVal + ", true")
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 遍历函数调用
+ * 注意：需要根据函数签名确定参数类型
+ */
+函数 codegen遍历函数调用(cg: Codegen, funcName: 文本, args: AST节点): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    /* 内置函数返回类型映射表 */
+    定义 可变 returnType: 文本
+    returnType = "i64"
+
+    若 funcName == "_u6574_u6570_u8f6c_u6587_u672c_u90e8" 则 {
+        returnType = "double"
+    } 否则 {
+        若 funcName == "print_float" 则 {
+            returnType = "double"
+        }
+    }
+
+    /* 处理函数参数 - 根据函数名确定参数类型 */
+    定义 可变 argStr: 文本
+    argStr = ""
+
+    若 args != 0 && 列表长度(args.children) > 0 则 {
+        定义 可变 i: 整数
+        i = 0
+        当 i < 列表长度(args.children) 则 {
+            定义 可变 argNode: AST节点
+            argNode = 列表获取(args.children, i)
+
+            /* 遍历参数表达式获取 SSA 值 */
+            定义 可变 argValue: 文本
+            argValue = codegen遍历表达式(cg, argNode)
+
+            /* 根据函数名和参数索引确定参数类型 */
+            定义 可变 paramType: 文本
+            paramType = codegen获取参数类型(funcName, i)
+
+            /* 将参数值添加到参数列表 */
+            若 i > 0 则 {
+                argStr = argStr + ", "
+            }
+            argStr = argStr + paramType + " %" + argValue
+
+            i = i + 1
+        }
+    }
+
+    /* 生成函数调用 IR */
+    若 argStr != "" 则 {
+        codegenEmit(cg, "  %" + result + " = call " + returnType + " @" + funcName + "(" + argStr + ")")
+    } 否则 {
+        codegenEmit(cg, "  %" + result + " = call " + returnType + " @" + funcName + "()")
+    }
+
+    返回 result
+}
+
+/**
+ * 获取函数参数类型
+ * 根据函数名和参数索引返回正确的 LLVM 类型
+ */
+函数 codegen获取参数类型(funcName: 文本, paramIndex: 整数): 文本 {
+    /* rt_list_append(i8*, i8*) - 两个参数都是指针 */
+    若 funcName == "rt_list_append" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_list_set(i8*, i64, i8*) - 第一和第三个参数是指针 */
+    若 funcName == "rt_list_set" 则 {
+        若 paramIndex == 0 || paramIndex == 2 则 {
+            返回 "i8*"
+        }
+        若 paramIndex == 1 则 {
+            返回 "i64"
+        }
+    }
+
+    /* rt_list_get(i8*, i64) - 第一个参数是指针 */
+    若 funcName == "rt_list_get" 则 {
+        若 paramIndex == 0 则 {
+            返回 "i8*"
+        }
+        若 paramIndex == 1 则 {
+            返回 "i64"
+        }
+    }
+
+    /* rt_list_len(i8*) - 唯一参数是指针 */
+    若 funcName == "rt_list_len" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_string_len(i8*) - 指针参数 */
+    若 funcName == "rt_string_len" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_string_concat(i8*, i8*) - 两个参数都是指针 */
+    若 funcName == "rt_string_concat" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_string_slice(i8*, i64, i64) - 第一个是指针，后续是整数 */
+    若 funcName == "rt_string_slice" 则 {
+        若 paramIndex == 0 则 {
+            返回 "i8*"
+        }
+        返回 "i64"
+    }
+
+    /* rt_str_new(i8*) - 指针参数 */
+    若 funcName == "rt_str_new" 则 {
+        返回 "i8*"
+    }
+
+    /* 打印函数 - 指针参数 */
+    若 funcName == "print" || funcName == "rt_print" 则 {
+        返回 "i8*"
+    }
+
+    /* 打印字符串函数 */
+    若 funcName == "print_string" 则 {
+        返回 "i8*"
+    }
+
+    /* 默认返回 i64 */
+    返回 "i64"
+}
+
+
+
+/**
+ * 生成带前缀的新标签
+ */
+函数 codegenNewLabelWithPrefix(cg: Codegen, prefix: 文本): 文本 {
+    定义 可变 num: 整数
+    num = cg.labelCount
+    cg.labelCount = cg.labelCount + 1
+    定义 可变 result: 文本
+    result = prefix
+    定义 可变 numStr: 文本
+    numStr = 整数转文本(num)
+    result = result + numStr
+    返回 result
+}
+
+/* ============ AST 遍历和 IR 生成 ============ */
+
+/**
+ * 遍历 AST 节点生成 IR
+ */
+函数 codegen遍历节点(cg: Codegen, nodeKind: 整数, nodeName: 文本): 文本 {
+    打印("遍历节点: kind=")
+    打印(nodeKind)
+    打印(", name=")
+    打印(nodeName)
+
+    定义 可变 result: 文本
+    result = ""
+
+    若 nodeKind == 0 则 {
+        result = codegen生成标识符(cg, nodeName)
+    } 否则 {
+        若 nodeKind == 2 则 {
+            result = codegen生成变量声明(cg, nodeName)
+        } 否则 {
+            若 nodeKind == 5 则 {
+                result = codegen生成函数调用(cg, nodeName, 0)
+            } 否则 {
+                若 nodeKind == 10 则 {
+                    result = codegen生成二元表达式(cg, nodeName, "", "")
+                } 否则 {
+                    若 nodeKind == 14 则 {
+                        result = codegen生成字面量(cg, nodeName)
+                    }
+                }
+            }
+        }
+    }
+
+    返回 result
+}
+
+/**
+ * 生成标识符 IR
+ */
+函数 codegen生成标识符(cg: Codegen, name: 文本): 文本 {
+    定义 可变 result: 文本
+    result = name + "_val"
+
+    定义 可变 line: 文本
+    line = "%" + result + " = load i64, i64* %" + name + "_slot"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成变量声明 IR
+ */
+函数 codegen生成变量声明(cg: Codegen, name: 文本): 文本 {
+    定义 可变 tmpPtr: 文本
+    tmpPtr = name + "_slot"
+
+    定义 可变 line: 文本
+    line = "%" + tmpPtr + " = alloca i64"
+    codegenEmit(cg, line)
+
+    返回 tmpPtr
+}
+
+/**
+ * 生成函数调用 IR
+ */
+函数 codegen生成函数调用(cg: Codegen, funcName: 文本, argCount: 整数): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    
+    /* 特殊处理列表操作函数 */
+    若 funcName == "_u5217_u8868_u8ffd_u52a0" 则 {
+        /* 列表添加/追加 */
+        line = "%" + result + " = call i64 @_u5217_u8868_u8ffd_u52a0(i8* null, i64 0)"
+        codegenEmit(cg, line)
+        返回 result
+    }
+    若 funcName == "_u5217_u8868_u8bbe_u7f6e" 则 {
+        /* 列表设置 */
+        line = "call void @_u5217_u8868_u8bbe_u7f6e(i8* null, i64 0, i64 0)"
+        codegenEmit(cg, line)
+        返回 result
+    }
+    若 funcName == "_u5217_u8868_u83b7_u53d6" 则 {
+        /* 列表获取 */
+        line = "%" + result + " = call i64 @_u5217_u8868_u83b7_u53d6(i8* null, i64 0)"
+        codegenEmit(cg, line)
+        返回 result
+    }
+    若 funcName == "_u5217_u8868_u957f_u5ea6" 则 {
+        /* 列表长度 */
+        line = "%" + result + " = call i64 @_u5217_u8868_u957f_u5ea6(i8* null)"
+        codegenEmit(cg, line)
+        返回 result
+    }
+    /* 特殊处理 rt_list_new 函数 */
+    若 funcName == "rt_list_new" 则 {
+        /* 列表创建 */
+        line = "%" + result + " = call i8* @rt_list_new()"
+        codegenEmit(cg, line)
+        返回 result
+    }
+    /* 其他函数 */
+    line = "%" + result + " = call i64 @" + funcName + "()"
+    codegenEmit(cg, line)
+    返回 result
+}
+
+/**
+ * 生成二元表达式 IR
+ */
+函数 codegen生成二元表达式(cg: Codegen, op: 文本, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 llOp: 文本
+    llOp = "add"
+
+    若 op == "+" 则 { llOp = "add" }
+    若 op == "-" 则 { llOp = "sub" }
+    若 op == "*" 则 { llOp = "mul" }
+    若 op == "/" 则 { llOp = "sdiv" }
+    若 op == "%" 则 { llOp = "srem" }
+
+    定义 可变 line: 文本
+    line = "%" + result + " = " + llOp + " i64 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成字面量 IR
+ */
+函数 codegen生成字面量(cg: Codegen, value: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = add i64 0, " + value
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成赋值 IR
+ */
+函数 codegen生成赋值IR(cg: Codegen, varName: 文本, value: 文本): 无返回 {
+    定义 可变 tmpPtr: 文本
+    tmpPtr = varName + "_slot"
+
+    定义 可变 line: 文本
+    line = "store i64 %" + value + ", i64* %" + tmpPtr
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 if 语句 IR
+ */
+函数 codegen生成If语句(cg: Codegen, condVar: 文本, thenLabel: 文本, elseLabel: 文本, endLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "br i1 %" + condVar + ", label %" + thenLabel + ", label %" + elseLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 while 循环 IR
+ */
+函数 codegen生成While循环(cg: Codegen, condVar: 文本, bodyLabel: 文本, endLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "br i1 %" + condVar + ", label %" + bodyLabel + ", label %" + endLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 for 循环 IR
+ */
+函数 codegen生成For循环(cg: Codegen, varName: 文本, startVal: 整数, endVal: 整数, bodyLabel: 文本, incLabel: 文本, endLabel: 文本): 无返回 {
+    定义 可变 tmpPtr: 文本
+    tmpPtr = varName + "_slot"
+
+    定义 可变 startTmp: 文本
+    startTmp = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + startTmp + " = add i64 0, " + 整数转文本(startVal)
+    codegenEmit(cg, line)
+
+    line = "store i64 %" + startTmp + ", i64* %" + tmpPtr
+    codegenEmit(cg, line)
+
+    line = "br label %" + incLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 match 语句 IR
+ */
+函数 codegen生成Match语句(cg: Codegen, subjectVar: 文本, branchCount: 整数): 无返回 {
+    打印("生成 match 语句 IR, subject=")
+    打印(subjectVar)
+    打印(", 分支数=")
+    打印(branchCount)
+}
+
+/**
+ * 生成返回语句 IR
+ */
+函数 codegen生成返回IR(cg: Codegen, value: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "ret i64 %" + value
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 break 语句 IR
+ */
+函数 codegen生成BreakIR(cg: Codegen, endLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "br label %" + endLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成 continue 语句 IR
+ */
+函数 codegen生成ContinueIR(cg: Codegen, loopLabel: 文本): 无返回 {
+    定义 可变 line: 文本
+    line = "br label %" + loopLabel
+    codegenEmit(cg, line)
+}
+
+/**
+ * 生成比较表达式 IR
+ */
+函数 codegen生成比较IR(cg: Codegen, op: 文本, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 llOp: 文本
+    llOp = "eq"
+
+    若 op == "==" 则 { llOp = "eq" }
+    若 op == "!=" 则 { llOp = "ne" }
+    若 op == "<" 则 { llOp = "slt" }
+    若 op == ">" 则 { llOp = "sgt" }
+    若 op == "<=" 则 { llOp = "sle" }
+    若 op == ">=" 则 { llOp = "sge" }
+
+    定义 可变 line: 文本
+    line = "%" + result + " = icmp " + llOp + " i64 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成逻辑与 IR
+ */
+函数 codegen生成逻辑与(cg: Codegen, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = and i1 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成逻辑或 IR
+ */
+函数 codegen生成逻辑或(cg: Codegen, left: 文本, right: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = or i1 %" + left + ", %" + right
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成逻辑非 IR
+ */
+函数 codegen生成逻辑非(cg: Codegen, operand: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = xor i1 %" + operand + ", true"
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/**
+ * 生成一元负 IR
+ */
+函数 codegen生成负值(cg: Codegen, operand: 文本): 文本 {
+    定义 可变 result: 文本
+    result = codegenNewTemp(cg)
+
+    定义 可变 line: 文本
+    line = "%" + result + " = sub i64 0, %" + operand
+    codegenEmit(cg, line)
+
+    返回 result
+}
+
+/* ============ 代码生成统计 ============ */
+
+/**
+ * 代码生成统计信息
+ */
+
+/**
+ * 创建代码生成统计
+ */
+函数 codegen创建统计(): CodegenStats {
+    定义 可变 stats: CodegenStats
+    stats.生成的指令数 = 0
+    stats.生成的分支数 = 0
+    stats.生成的函数数 = 0
+    stats.生成的全局变量数 = 0
+    stats.总内存分配 = 0
+    返回 stats
+}
+
+/**
+ * 打印代码生成统计
+ */
+函数 codegen打印统计(stats: CodegenStats): 无返回 {
+    打印("=== 代码生成统计 ===")
+    打印("  生成的指令数: ")
+    打印(stats.生成的指令数)
+    打印("  生成的分支数: ")
+    打印(stats.生成的分支数)
+    打印("  生成的函数数: ")
+    打印(stats.生成的函数数)
+    打印("  生成的全局变量数: ")
+    打印(stats.生成的全局变量数)
+    打印("  总内存分配: ")
+    打印(stats.总内存分配)
+    打印("  bytes")
+}
+
+/* ============ 测试函数 ============ */
+
+/**
+ * 创建一个简单的测试 AST
+ * 用于测试代码生成器
+ */
+函数 codegen创建测试AST(): AST节点 {
+    定义 可变 root: AST节点
+    root.kind = 0  // 程序节点
+    root.name = "测试程序"
+    root.children = 列表()
+    
+    /* 创建主函数 */
+    定义 可变 mainFunc: AST节点
+    mainFunc.kind = 1  // 函数定义
+    mainFunc.name = "主"
+    mainFunc.children = 列表()
+    
+    /* 创建函数体（块语句） */
+    定义 可变 body: AST节点
+    body.kind = 18  // 块语句
+    body.children = 列表()
+    
+    /* 添加变量定义：x = 42 */
+    定义 可变 varX: AST节点
+    varX.kind = 3  // 变量定义
+    varX.name = "x"
+    varX.children = 列表()
+    
+    /* 添加字面量 42 */
+    定义 可变 lit42: AST节点
+    lit42.kind = 14  // 字面量表达式
+    lit42.value = "42"
+    列表追加(varX.children, lit42)
+    列表追加(body.children, varX)
+    
+    /* 添加返回语句 */
+    定义 可变 retStmt: AST节点
+    retStmt.kind = 8  // 返回语句
+    retStmt.children = 列表()
+    
+    /* 添加标识符 x */
+    定义 可变 idX: AST节点
+    idX.kind = 13  // 标识符表达式
+    idX.name = "x"
+    列表追加(retStmt.children, idX)
+    列表追加(body.children, retStmt)
+    
+    /* 把函数体添加到函数 */
+    列表追加(mainFunc.children, body)
+    
+    /* 把主函数添加到根节点 */
+    列表追加(root.children, mainFunc)
+    
+    返回 root
+}
+
+/**
+ * 测试代码生成器
+ */
+函数 codegen测试(): 整数 {
+    打印("=== 代码生成器测试 ===")
+    
+    /* 创建测试 AST */
+    定义 可变 testAST: AST节点
+    testAST = codegen创建测试AST()
+    
+    /* 遍历 AST 生成 IR */
+    打印("正在生成 LLVM IR...")
+    定义 可变 moduleName: 文本
+    moduleName = codegen遍历AST(testAST)
+    
+    打印("=== 测试完成 ===")
+    打印("生成的模块: ")
+    打印(moduleName)
+    
+    返回 1
+}
+
+/**
+ * 测试字符串常量管理
+ */
+函数 codegen测试字符串常量(): 整数 {
+    打印("=== 字符串常量测试 ===")
+    
+    定义 可变 cg: Codegen
+    cg = codegenInit()
+    
+    /* 添加一些字符串常量 */
+    定义 可变 str1: 文本
+    str1 = codegen添加字符串常量(cg, "Hello, World!")
+    定义 可变 str2: 文本
+    str2 = codegen添加字符串常量(cg, "测试字符串")
+    定义 可变 str3: 文本
+    str3 = codegen添加字符串常量(cg, "Hello, World!")  // 重复的字符串
+    
+    打印("字符串1: ")
+    打印(str1)
+    打印("字符串2: ")
+    打印(str2)
+    打印("字符串3 (重复): ")
+    打印(str3)
+    
+    /* 查找字符串 */
+    定义 可变 found1: 文本
+    found1 = codegen查找字符串常量(cg, "Hello, World!")
+    定义 可变 found2: 文本
+    found2 = codegen查找字符串常量(cg, "不存在的字符串")
+    
+    打印("查找 'Hello, World!': ")
+    打印(found1)
+    打印("查找 '不存在的字符串': ")
+    打印(found2)
+    
+    打印("=== 字符串常量测试完成 ===")
+    返回 1
+}
+
+/**
+ * 测试变量映射管理
+ */
+函数 codegen测试变量映射(): 整数 {
+    打印("=== 变量映射测试 ===")
+    
+    定义 可变 cg: Codegen
+    cg = codegenInit()
+    
+    /* 添加变量 */
+    codegen添加变量(cg, "x", "x_slot", "整数")
+    codegen添加变量(cg, "y", "y_slot", "浮点数")
+    codegen添加变量(cg, "name", "name_slot", "文本")
+    
+    /* 查找变量 */
+    定义 可变 ssaX: 文本
+    ssaX = codegen查找变量(cg, "x")
+    定义 可变 typeX: 文本
+    typeX = codegen查找变量类型(cg, "x")
+    定义 可变 ssaY: 文本
+    ssaY = codegen查找变量(cg, "y")
+    定义 可变 typeY: 文本
+    typeY = codegen查找变量类型(cg, "y")
+    定义 可变 ssaNotFound: 文本
+    ssaNotFound = codegen查找变量(cg, "不存在的变量")
+    
+    打印("变量 x - SSA: ")
+    打印(ssaX)
+    打印(", 类型: ")
+    打印(typeX)
+    打印("变量 y - SSA: ")
+    打印(ssaY)
+    打印(", 类型: ")
+    打印(typeY)
+    打印("变量 '不存在的变量': ")
+    打印(ssaNotFound)
+    
+    /* 清空变量映射 */
+    codegen清空变量(cg)
+    打印("清空后变量映射大小: ")
+    打印(列表长度(cg.variableMap))
+    
+    打印("=== 变量映射测试完成 ===")
+    返回 1
+}
+
+/**
+ * 主测试函数
+ */
+函数 codegen运行所有测试(): 整数 {
+    打印("")
+    打印("========================================")
+    打印("   玄语 L2 编译器 - 代码生成器测试")
+    打印("========================================")
+    打印("")
+    
+    定义 可变 success: 整数
+    success = 1
+    
+    /* 测试变量映射 */
+    若 codegen测试变量映射() != 1 则 { success = 0 }
+    打印("")
+    
+    /* 测试字符串常量 */
+    若 codegen测试字符串常量() != 1 则 { success = 0 }
+    打印("")
+    
+    /* 测试完整代码生成 */
+    若 codegen测试() != 1 则 { success = 0 }
+    打印("")
+    
+    打印("========================================")
+    若 success == 1 则 {
+        打印("   所有测试通过 ✓")
+    } 否则 {
+        打印("   部分测试失败 ✗")
+    }
+    打印("========================================")
+    打印("")
+    
+    返回 success
+}

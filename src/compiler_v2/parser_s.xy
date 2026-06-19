@@ -1,0 +1,2113 @@
+引入 "types"
+
+/**
+ * @file parser.xy
+ * @brief 语法解析器 - 自展编译器
+ * @description 递归下降解析器，实现表达式、语句、函数的解析
+ */
+
+/* ============ 关键字表 ============ */
+
+/* 关键字识别 */
+函数 是关键字(text: 文本): 整数 {
+    若 text == "若" 则 { 返回 1 }
+    若 text == "则" 则 { 返回 1 }
+    若 text == "否则" 则 { 返回 1 }
+    若 text == "当" 则 { 返回 1 }
+    若 text == "循环" 则 { 返回 1 }
+    若 text == "从" 则 { 返回 1 }
+    若 text == "到" 则 { 返回 1 }
+    若 text == "返回" 则 { 返回 1 }
+    若 text == "定义" 则 { 返回 1 }
+    若 text == "可变" 则 { 返回 1 }
+    若 text == "函数" 则 { 返回 1 }
+    若 text == "结构体" 则 { 返回 1 }
+    若 text == "枚举" 则 { 返回 1 }
+    若 text == "真" 则 { 返回 1 }
+    若 text == "假" 则 { 返回 1 }
+    若 text == "跳过" 则 { 返回 1 }
+    若 text == "退出" 则 { 返回 1 }
+    若 text == "引入" 则 { 返回 1 }
+    若 text == "模块" 则 { 返回 1 }
+    若 text == "导出" 则 { 返回 1 }
+    返回 0
+}
+
+/* 获取关键字类型 */
+函数 getKeywordType(text: 文本): 整数 {
+    若 text == "若" 则 { 返回 1 }     // IF
+    若 text == "则" 则 { 返回 2 }     // THEN
+    若 text == "否则" 则 { 返回 3 }   // ELSE
+    若 text == "当" 则 { 返回 4 }    // WHILE
+    若 text == "循环" 则 { 返回 5 }   // LOOP
+    若 text == "从" 则 { 返回 6 }    // FROM
+    若 text == "到" 则 { 返回 7 }    // TO
+    若 text == "返回" 则 { 返回 8 }   // RETURN
+    若 text == "定义" 则 { 返回 9 }   // LET
+    若 text == "函数" 则 { 返回 10 }  // FUNC
+    若 text == "真" 则 { 返回 11 }   // TRUE
+    若 text == "假" 则 { 返回 12 }   // FALSE
+    若 text == "跳过" 则 { 返回 13 }  // CONTINUE
+    若 text == "退出" 则 { 返回 14 }  // BREAK
+    若 text == "引入" 则 { 返回 15 }  // IMPORT
+    若 text == "模块" 则 { 返回 16 }  // MODULE
+    若 text == "导出" 则 { 返回 17 }  // EXPORT
+    若 text == "整数" 则 { 返回 20 }  // TYPE_INT
+    若 text == "浮点数" 则 { 返回 21 } // TYPE_FLOAT
+    若 text == "双精度" 则 { 返回 22 } // TYPE_DOUBLE
+    若 text == "布尔" 则 { 返回 23 }  // TYPE_BOOL
+    若 text == "文本" 则 { 返回 24 }  // TYPE_STRING
+    若 text == "无返回" 则 { 返回 25 } // TYPE_VOID
+    若 text == "字符" 则 { 返回 26 }  // TYPE_CHAR
+    若 text == "指针" 则 { 返回 27 }  // TYPE_POINTER
+    若 text == "列表" 则 { 返回 28 }  // TYPE_LIST
+    若 text == "长整数" 则 { 返回 29 } // TYPE_LONG
+    返回 0
+}
+
+/* ============ 初始化 ============ */
+
+函数 parserInit(tokens: 列表): Parser {
+    定义 可变 p: Parser
+    p.pos = 0
+    p.tokens = tokens
+    p.errors = 列表()
+    p.nodeCount = 0
+    p.tokenCount = 列表长度(tokens)
+    返回 p
+}
+
+/* ============ Token 访问辅助函数 ============ */
+
+/* 获取当前 token */
+函数 parserPeekToken(p: Parser): Token {
+    定义 可变 tok: Token
+    tok.类型 = 0
+    tok.值 = ""
+    tok.行号 = 0
+    tok.列号 = 0
+    tok.开始位置 = 0
+    tok.结束位置 = 0
+
+    若 p.pos < p.tokenCount 则 {
+        定义 可变 t: Token
+        t = p.tokens[p.pos]
+        返回 t
+    }
+
+    tok.类型 = 6  // 结束
+    tok.值 = "EOF"
+    返回 tok
+}
+
+/* 消费 token 并前进 */
+函数 parserConsume(p: Parser): Token {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    p.pos = p.pos + 1
+    返回 tok
+}
+
+/* 检查当前 token 是否为指定值 */
+函数 parserCheck(p: Parser, 值: 文本): 整数 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    若 tok.值 == 值 则 {
+        返回 1
+    }
+    返回 0
+}
+
+/* 检查当前 token 是否为指定类型 */
+函数 parserCheckType(p: Parser, 类型: 整数): 整数 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    若 tok.类型 == 类型 则 {
+        返回 1
+    }
+    返回 0
+}
+
+/* 匹配并消费 token */
+函数 parserMatch(p: Parser, 值: 文本): 整数 {
+    若 parserCheck(p, 值) == 1 则 {
+        定义 可变 tok: Token
+        tok = parserConsume(p)
+        返回 1
+    }
+    返回 0
+}
+
+/* 生成新的 AST 节点 ID */
+函数 parserNewNodeId(p: Parser): 整数 {
+    p.nodeCount = p.nodeCount + 1
+    返回 p.nodeCount
+}
+
+/* 创建 AST 节点 */
+函数 parserCreateNode(kind: 整数, name: 文本, value: 文本, line: 整数): AST节点 {
+    定义 可变 node: AST节点
+    node.id = 0
+    node.kind = kind
+    node.name = name
+    node.value = value
+    node.intValue = 0
+    node.line = line
+    node.children = 列表()
+    返回 node
+}
+
+/* ============ 表达式解析 ============ */
+
+/* 解析主表达式 (标识符、数字、字符串、括号) */
+函数 parsePrimary(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(0, "", "", tok.行号)
+
+    /* 标识符 */
+    若 tok.类型 == 0 则 {
+        node.kind = 13  // 标识符表达式
+        node.name = tok.值
+        node.value = tok.值
+        parserConsume(p)
+
+        /* 检查是否是函数调用 */
+        tok = parserPeekToken(p)
+        若 tok.值 == "(" 则 {
+            node = parseCall(p, node)
+        }
+        返回 node
+    }
+
+    /* 数字 */
+    若 tok.类型 == 1 则 {
+        node.kind = 14  // 字面量表达式
+        node.value = tok.值
+        node.intValue = 文本转整数(tok.值)
+        parserConsume(p)
+        返回 node
+    }
+
+    /* 字符串 */
+    若 tok.类型 == 2 则 {
+        node.kind = 14  // 字面量表达式
+        node.value = tok.值
+        parserConsume(p)
+        返回 node
+    }
+
+    /* 左括号 - 括号表达式 */
+    若 tok.值 == "(" 则 {
+        parserConsume(p)
+        node = parseExpression(p)
+        tok = parserPeekToken(p)
+        若 tok.值 == ")" 则 {
+            parserConsume(p)
+        }
+        返回 node
+    }
+
+    /* 一元减号 */
+    若 tok.值 == "-" 则 {
+        parserConsume(p)
+        定义 可变 operand: AST节点
+        operand = parsePrimary(p)
+        node.kind = 11  // 一元表达式
+        node.name = "-"
+        返回 node
+    }
+
+    /* 空表达式 */
+    返回 node
+}
+
+/* 解析函数调用 */
+函数 parseCall(p: Parser, funcNode: AST节点): AST节点 {
+    定义 可变 tok: Token
+
+    /* 消费 ( */
+    tok = parserPeekToken(p)
+    若 tok.值 == "(" 则 {
+        parserConsume(p)
+    } 否则 {
+        parser报告错误(p, "期望 '('")
+    }
+
+    funcNode.kind = 12  // 调用表达式
+    funcNode.children = 列表()
+
+    /* 循环解析参数 */
+    循环 {
+        tok = parserPeekToken(p)
+
+        // 结束条件：遇到 )
+        若 tok.值 == ")" 则 {
+            跳出
+        }
+
+        // 文件末尾，缺少 )
+        若 tok.类型 == 6 则 {
+            parser报告错误(p, "函数调用未闭合，期望 ')'")
+            跳出
+        }
+
+        // 解析一个参数
+        定义 可变 arg: AST节点
+        arg = parseExpression(p)
+        列表追加(funcNode.children, arg)
+
+        // 看下一个 token：逗号 or 结束
+        tok = parserPeekToken(p)
+        若 tok.值 == "," 则 {
+            parserConsume(p)  // 吃掉逗号，继续下一个参数
+        } 否则 若 tok.值 != ")" 则 {
+            parser报告错误(p, "参数后期望逗号或右括号")
+        }
+    }
+
+    /* 消费 ) */
+    tok = parserPeekToken(p)
+    若 tok.值 == ")" 则 {
+        parserConsume(p)
+    } 否则 {
+        parser报告错误(p, "期望 ')' 结束函数调用")
+    }
+
+    返回 funcNode
+}
+
+/* 解析一元表达式 */
+函数 parseUnary(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    /* 一元运算符 */
+    若 tok.值 == "!" || tok.值 == "-" 则 {
+        定义 可变 op: 文本
+        op = tok.值
+        parserConsume(p)
+        定义 可变 operand: AST节点
+        operand = parseUnary(p)
+        定义 可变 node: AST节点
+        node = parserCreateNode(11, op, "", tok.行号)
+        node.children = operand
+        返回 node
+    }
+
+    返回 parsePrimary(p)
+}
+
+/* 获取运算符优先级 */
+函数 getOpPriority(op: 文本): 整数 {
+    若 op == "||" 则 { 返回 1 }
+    若 op == "&&" 则 { 返回 2 }
+    若 op == "==" || op == "!=" 则 { 返回 3 }
+    若 op == "<" || op == ">" || op == "<=" || op == ">=" 则 { 返回 4 }
+    若 op == "+" || op == "-" 则 { 返回 5 }
+    若 op == "*" || op == "/" || op == "%" 则 { 返回 6 }
+    返回 0
+}
+
+/* 是右结合运算符 */
+函数 是右结合(op: 文本): 整数 {
+    若 op == "=" 则 { 返回 1 }
+    返回 0
+}
+
+/* 解析带优先级的二元表达式 (Pratt Parser) */
+函数 parseBinaryExpr(p: Parser, minPriority: 整数): AST节点 {
+    定义 可变 left: AST节点
+    left = parseUnary(p)
+
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    定义 可变 priority: 整数
+    priority = getOpPriority(tok.值)
+
+    当 priority >= minPriority && priority > 0 则 {
+        定义 可变 op: 文本
+        op = tok.值
+        parserConsume(p)
+
+        定义 可变 nextMinPriority: 整数
+        nextMinPriority = priority + 1
+        若 是右结合(op) == 1 则 {
+            nextMinPriority = priority
+        }
+
+        定义 可变 right: AST节点
+        right = parseBinaryExpr(p, nextMinPriority)
+
+        定义 可变 node: AST节点
+        node = parserCreateNode(10, op, "", tok.行号)
+        node.children = left
+        node.value = ""  // 第二个子节点
+
+        left = node
+        tok = parserPeekToken(p)
+        priority = getOpPriority(tok.值)
+    }
+
+    返回 left
+}
+
+/* 是二元运算符 */
+函数 isBinaryOp(text: 文本): 整数 {
+    若 text == "+" || text == "-" || text == "*" || text == "/" 则 { 返回 1 }
+    若 text == "%" || text == "==" || text == "!=" 则 { 返回 1 }
+    若 text == "<" || text == ">" || text == "<=" || text == ">=" 则 { 返回 1 }
+    若 text == "&&" || text == "||" 则 { 返回 1 }
+    返回 0
+}
+
+/* 解析二元表达式 */
+函数 parseExpression(p: Parser): AST节点 {
+    返回 parseBinaryExpr(p, 1)
+}
+
+/* 解析索引访问表达式 */
+/* 索引访问: base[index] -> children[0]=base, children[1]=index */
+函数 parseIndexAccess(p: Parser, base: AST节点): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(15, "", "", tok.行号)  // 复用类型转换节点kind=15
+    node.children = 列表()
+    node.children.追加(base)  // children[0] = 被索引对象
+    node.children.追加(空节点)  // children[1] = 索引（稍后填充）
+
+    /* 消费 '[' */
+    若 tok.值 == "[" 则 {
+        parserConsume(p)
+
+        /* 解析索引 */
+        定义 可变 index: AST节点
+        index = parseExpression(p)
+
+        /* 消费 ']' */
+        tok = parserPeekToken(p)
+        若 tok.值 == "]" 则 {
+            parserConsume(p)
+        }
+
+        /* 设置索引 */
+        node.children[1] = index
+    }
+
+    返回 node
+}
+
+/* 解析字段访问表达式 */
+函数 parseFieldAccess(p: Parser, base: AST节点): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(0, "", "", tok.行号)
+
+    /* 消费 '.' */
+    若 tok.值 == "." 则 {
+        parserConsume(p)
+
+        /* 获取字段名 */
+        tok = parserPeekToken(p)
+        若 tok.类型 == 0 则 {
+            node.kind = 23  // 结构体字段节点
+            node.name = tok.值
+            node.children = base
+            parserConsume(p)
+        }
+    }
+
+    返回 node
+}
+
+/* 解析后缀表达式（索引、调用、字段访问） */
+函数 parsePostfix(p: Parser, base: AST节点): AST节点 {
+    定义 可变 node: AST节点
+    node = base
+
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    当 tok.值 == "(" || tok.值 == "[" || tok.值 == "." 则 {
+        若 tok.值 == "(" 则 {
+            node = parseCall(p, node)
+        } 否则 {
+            若 tok.值 == "[" 则 {
+                node = parseIndexAccess(p, node)
+            } 否则 {
+                若 tok.值 == "." 则 {
+                    node = parseFieldAccess(p, node)
+                }
+            }
+        }
+        tok = parserPeekToken(p)
+    }
+
+    返回 node
+}
+
+/* ============ 语句解析 ============ */
+
+/* 解析赋值语句或表达式语句 */
+函数 parseAssignmentOrExpression(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(9, "", "", tok.行号)  // 表达式语句
+
+    // 检查是否是赋值
+    若 tok.类型 == 0 则 {
+        定义 可变 nextTok: Token
+        定义 可变 savedPos: 整数
+        savedPos = p.pos
+
+        // 消费标识符
+        parserConsume(p)
+        nextTok = parserPeekToken(p)
+
+        // 如果下一个是 =、+=、-=、*=、/=、%= 则为赋值
+        若 nextTok.值 == "=" 则 {
+            parserConsume(p)  // 消费 =
+            定义 可变 valueNode: AST节点
+            valueNode = parseExpression(p)
+            node.kind = 19  // 赋值表达式
+            node.name = tok.值
+            node.value = "="
+            返回 node
+        } 否则 {
+            // 不是赋值，回退
+            p.pos = savedPos
+        }
+    }
+
+    // 作为表达式解析
+    node = parseExpression(p)
+    返回 node
+}
+
+/* 解析赋值语句 */
+函数 parseAssignmentStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    定义 可变 line: 整数
+    line = tok.行号
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(4, "", "", line)  // 赋值语句
+
+    // 获取变量名
+    tok = parserPeekToken(p)
+    若 tok.类型 == 0 则 {
+        node.name = tok.值
+        parserConsume(p)
+    }
+
+    // 获取赋值运算符
+    tok = parserPeekToken(p)
+    定义 可变 op: 文本
+    op = "="
+
+    若 tok.值 == "=" 则 { op = "=" }
+    若 tok.值 == "+=" 则 { op = "+=" }
+    若 tok.值 == "-=" 则 { op = "-=" }
+    若 tok.值 == "*=" 则 { op = "*=" }
+    若 tok.值 == "/=" 则 { op = "/=" }
+    若 tok.值 == "%=" 则 { op = "%=" }
+
+    node.value = op
+    parserConsume(p)
+
+    // 解析右侧表达式
+    定义 可变 valueNode: AST节点
+    valueNode = parseExpression(p)
+
+    // 消费分号（如果有）
+    tok = parserPeekToken(p)
+    若 tok.值 == ";" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+/* 解析变量定义语句: 定义 可变 变量名: 类型 = 值 */
+函数 parseLetStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    定义 可变 line: 整数
+    line = tok.行号
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(3, "", "", line)  // 变量定义
+
+    /* 消费 '定义' */
+    若 tok.值 == "定义" 则 {
+        parserConsume(p)
+    }
+
+    /* 获取变量名 */
+    tok = parserPeekToken(p)
+    若 tok.类型 == 0 则 {
+        node.name = tok.值
+        parserConsume(p)
+    }
+
+    /* 消费 ':' (可选) */
+    tok = parserPeekToken(p)
+    若 tok.值 == ":" 则 {
+        parserConsume(p)
+        /* 消费类型 */
+        tok = parserPeekToken(p)
+        node.value = tok.值
+        parserConsume(p)
+    }
+
+    /* 消费 '=' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "=" 则 {
+        parserConsume(p)
+        /* 解析初始值表达式 */
+        定义 可变 expr: AST节点
+        expr = parseExpression(p)
+        node.children = expr  // 设置初始值作为子节点
+    }
+
+    返回 node
+}
+
+/* 解析返回语句 */
+函数 parseReturnStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    定义 可变 line: 整数
+    line = tok.行号
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(8, "", "", line)  // 返回语句
+
+    /* 消费 '返回' */
+    若 tok.值 == "返回" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析返回值（可选） */
+    tok = parserPeekToken(p)
+    若 tok.值 != "}" 则 {
+        定义 可变 expr: AST节点
+        expr = parseExpression(p)
+        node.children = expr  // 设置返回值作为子节点
+    }
+
+    返回 node
+}
+
+/* 解析 break 语句 */
+函数 parseBreakStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    定义 可变 line: 整数
+    line = tok.行号
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(16, "", "", line)  // break语句
+
+    /* 消费 '退出' */
+    若 tok.值 == "退出" 则 {
+        parserConsume(p)
+    }
+
+    /* 消费 ';' */
+    tok = parserPeekToken(p)
+    若 tok.值 == ";" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+/* 解析 continue 语句 */
+函数 parseContinueStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    定义 可变 line: 整数
+    line = tok.行号
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(17, "", "", line)  // continue语句
+
+    /* 消费 '跳过' */
+    若 tok.值 == "跳过" 则 {
+        parserConsume(p)
+    }
+
+    /* 消费 ';' */
+    tok = parserPeekToken(p)
+    若 tok.值 == ";" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+/* 解析块语句 */
+函数 parseBlock(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    定义 可变 line: 整数
+    line = tok.行号
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(18, "", "", line)  // 块语句
+    node.children = 列表()
+
+    /* 消费 '{' */
+    若 tok.值 == "{" 则 {
+        parserConsume(p)
+    }
+
+    /* 循环解析语句 */
+    tok = parserPeekToken(p)
+    当 tok.值 != "}" && tok.值 != "" && tok.类型 != 6 则 {
+        定义 可变 stmt: AST节点
+
+        若 tok.值 == "定义" 则 {
+            stmt = parseLetStatement(p)
+            node.children = stmt  // 添加语句到块
+        } 否则 {
+            若 tok.值 == "返回" 则 {
+                stmt = parseReturnStatement(p)
+                node.children = stmt  // 添加语句到块
+            } 否则 {
+                若 tok.值 == "若" 则 {
+                    stmt = parseIfStatement(p)
+                    node.children = stmt  // 添加语句到块
+                } 否则 {
+                    若 tok.值 == "当" 则 {
+                        stmt = parseWhileStatement(p)
+                        node.children = stmt  // 添加语句到块
+                    } 否则 {
+                        若 tok.值 == "循环" 则 {
+                            stmt = parseForStatement(p)
+                            node.children = stmt  // 添加语句到块
+                        } 否则 {
+                            若 tok.值 == "匹配" 则 {
+                                stmt = parseMatchStatement(p)
+                                node.children = stmt  // 添加语句到块
+                            } 否则 {
+                                若 tok.值 == "退出" 则 {
+                                    stmt = parseBreakStatement(p)
+                                    node.children = stmt
+                                }
+                            } 否则 {
+                                若 tok.值 == "跳过" 则 {
+                                    stmt = parseContinueStatement(p)
+                                    node.children = stmt
+                                } 否则 {
+                                    stmt = parseAssignmentOrExpression(p)
+                                    node.children = stmt  // 添加语句到块
+                                    // 消费分号
+                                    tok = parserPeekToken(p)
+                                    若 tok.值 == ";" 则 {
+                                        parserConsume(p)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        tok = parserPeekToken(p)
+    }
+
+    /* 消费 '}' */
+    若 tok.值 == "}" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+/* 解析 if 语句 */
+/* 支持: 若 expr 则 { ... }
+ *       若 expr 则 { ... } 否则若 expr 则 { ... }
+ *       若 expr 则 { ... } 否则 { ... }
+ */
+函数 parseIfStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(5, "", "", line)
+    node.children = 列表()
+
+    /* 消费 '若' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "若" 则 {
+        line = tok.行号
+        parserConsume(p)
+    }
+
+    /* 解析条件表达式 */
+    定义 可变 condNode: AST节点
+    condNode = parseExpression(p)
+    node.children.追加(condNode)
+
+    /* 消费 '则' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "则" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析 then 分支（块或单语句） */
+    定义 可变 thenNode: AST节点
+    tok = parserPeekToken(p)
+    若 tok.值 == "{" 则 {
+        thenNode = parseBlock(p)
+    } 否则 {
+        thenNode = parseExpression(p)
+    }
+    node.children.追加(thenNode)
+
+    /* 检查 '否则' 或 '否则若' */
+    tok = parserPeekToken(p)
+    定义 可变 elseNode: AST节点
+    elseNode = parserCreateNode(0, "", "", line)
+
+    若 tok.值 == "否则若" 则 {
+        /* 否则若 - 递归解析嵌套的 if 语句 */
+        parserConsume(p)
+        elseNode = parseIfStatement(p)
+    } 否则 若 tok.值 == "否则" 则 {
+        parserConsume(p)
+        /* 解析普通 else 块 */
+        tok = parserPeekToken(p)
+        若 tok.值 == "{" 则 {
+            elseNode = parseBlock(p)
+        } 否则 {
+            /* 否则后是单语句（简化处理，解析为表达式） */
+            elseNode = parseExpression(p)
+        }
+    }
+    node.children.追加(elseNode)
+
+    返回 node
+}
+
+/* 解析 while 语句 */
+函数 parseWhileStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(6, "", "", line)
+    node.children = 列表()
+
+    /* 消费 '当' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "当" 则 {
+        line = tok.行号
+        parserConsume(p)
+    }
+
+    /* 解析条件表达式 */
+    定义 可变 condNode: AST节点
+    condNode = parseExpression(p)
+    node.children.追加(condNode)
+
+    /* 解析循环体（块或单语句） */
+    定义 可变 bodyNode: AST节点
+    tok = parserPeekToken(p)
+    若 tok.值 == "{" 则 {
+        bodyNode = parseBlock(p)
+    } 否则 {
+        bodyNode = parseExpression(p)
+    }
+    node.children.追加(bodyNode)
+
+    返回 node
+}
+
+/* 解析 for 循环语句: 循环 变量 从 起始 到 结束 遍历 */
+函数 parseForStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(20, "", "", line)
+    node.children = 列表()
+
+    /* 消费 '循环' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "循环" 则 {
+        line = tok.行号
+        node.line = line
+        parserConsume(p)
+    }
+
+    /* 获取循环变量名 */
+    tok = parserPeekToken(p)
+    若 tok.类型 == 0 则 {
+        node.name = tok.值
+        parserConsume(p)
+    }
+
+    /* 消费 '从' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "从" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析起始值 */
+    定义 可变 startNode: AST节点
+    startNode = parseExpression(p)
+    node.children.追加(startNode)
+
+    /* 消费 '到' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "到" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析结束值 */
+    定义 可变 endNode: AST节点
+    endNode = parseExpression(p)
+    node.children.追加(endNode)
+
+    /* 解析循环体（块或单语句） */
+    定义 可变 bodyNode: AST节点
+    tok = parserPeekToken(p)
+    若 tok.值 == "{" 则 {
+        bodyNode = parseBlock(p)
+    } 否则 {
+        bodyNode = parseExpression(p)
+    }
+    node.children.追加(bodyNode)
+
+    返回 node
+}
+
+/* 解析 match 语句: 匹配 表达式 { case 值: 语句, default: 语句 } */
+函数 parseMatchStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(25, "", "", line)  // match语句
+    node.children = 列表()
+
+    /* 消费 '匹配' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "匹配" 则 {
+        line = tok.行号
+        node.line = line
+        parserConsume(p)
+    }
+
+    /* 解析被匹配的值并添加到 children */
+    定义 可变 subjectNode: AST节点
+    subjectNode = parseExpression(p)
+    node.children.追加(subjectNode)
+
+    /* 消费 '{' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "{" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析分支 */
+    tok = parserPeekToken(p)
+    当 tok.值 != "}" && tok.值 != "" && tok.类型 != 6 则 {
+        定义 可变 branchNode: AST节点
+        branchNode = parserCreateNode(26, "", "", line)
+        branchNode.children = 列表()
+
+        /* 检查是否是 default 分支 */
+        若 tok.值 == "默认" 则 {
+            /* 默认分支 */
+            parserConsume(p)
+            tok = parserPeekToken(p)
+            若 tok.值 == ":" 则 {
+                parserConsume(p)
+            }
+            定义 可变 defaultBody: AST节点
+            defaultBody = parseExpression(p)
+            branchNode = parserCreateNode(27, "", "", line)  // match默认分支
+            branchNode.children = 列表()
+            branchNode.children.追加(defaultBody)
+            node.children.追加(branchNode)
+        } 否则 {
+            /* case 分支 */
+            若 tok.值 == "情况" 则 {
+                parserConsume(p)
+            }
+
+            /* 解析 case 值 */
+            定义 可变 caseValue: 文本
+            caseValue = ""
+            tok = parserPeekToken(p)
+            若 tok.类型 == 1 则 {
+                caseValue = tok.值
+                parserConsume(p)
+            } 否则 {
+                若 tok.类型 == 0 则 {
+                    caseValue = tok.值
+                    parserConsume(p)
+                }
+            }
+
+            branchNode = parserCreateNode(26, caseValue, "", tok.行号)  // match分支
+            branchNode.children = 列表()
+
+            /* 消费 ':' */
+            tok = parserPeekToken(p)
+            若 tok.值 == ":" 则 {
+                parserConsume(p)
+            }
+
+            /* 解析分支体并添加到 children */
+            定义 可变 branchBody: AST节点
+            branchBody = parseExpression(p)
+            branchNode.children.追加(branchBody)
+            node.children.追加(branchNode)
+        }
+
+        /* 消费 ',' || ';' */
+        tok = parserPeekToken(p)
+        若 tok.值 == "," 则 {
+            parserConsume(p)
+        }
+
+        tok = parserPeekToken(p)
+    }
+
+    /* 消费 '}' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "}" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+/* ============ 函数解析 ============ */
+
+/* 解析结构体定义: 结构体 结构体名 { 字段1: 类型1, 字段2: 类型2 } */
+函数 parseStructDefinition(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(21, "", "", line)  // 结构体定义
+    node.children = 列表()
+
+    /* 消费 '结构体' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "结构体" 则 {
+        line = tok.行号
+        node.line = line
+        parserConsume(p)
+    }
+
+    /* 获取结构体名 */
+    tok = parserPeekToken(p)
+    若 tok.类型 == 0 则 {
+        node.name = tok.值
+        parserConsume(p)
+    }
+
+    /* 消费 '{' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "{" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析字段列表 */
+    tok = parserPeekToken(p)
+    当 tok.值 != "}" && tok.值 != "" && tok.类型 != 6 则 {
+        /* 获取字段名 */
+        若 tok.类型 == 0 则 {
+            定义 可变 fieldNode: AST节点
+            fieldNode = parserCreateNode(23, tok.值, "", tok.行号)  // 结构体字段
+            parserConsume(p)
+
+            /* 消费 ':' */
+            tok = parserPeekToken(p)
+            若 tok.值 == ":" 则 {
+                parserConsume(p)
+            }
+
+            /* 获取字段类型 */
+            tok = parserPeekToken(p)
+            若 tok.类型 == 3 则 {
+                fieldNode.value = tok.值
+                parserConsume(p)
+            }
+
+            node.children.追加(fieldNode)
+
+            /* 消费 ',' || '}' */
+            tok = parserPeekToken(p)
+            若 tok.值 == "," 则 {
+                parserConsume(p)
+            }
+        }
+
+        tok = parserPeekToken(p)
+    }
+
+    /* 消费 '}' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "}" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+/* 解析导入语句: 引入 "模块路径" */
+函数 parseImportStatement(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(28, "", "", line)  // 导入语句
+    node.children = 列表()
+
+    /* 消费 '引入' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "引入" 则 {
+        line = tok.行号
+        node.line = line
+        parserConsume(p)
+    }
+
+    /* 解析模块路径 */
+    tok = parserPeekToken(p)
+    若 tok.类型 == 2 则 {
+        node.name = tok.值
+        parserConsume(p)
+    }
+
+    /* 消费分号（可选） */
+    tok = parserPeekToken(p)
+    若 tok.值 == ";" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+/* 解析模块定义: 模块 模块名 { ... } */
+函数 parseModuleDefinition(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(29, "", "", line)  // 模块定义
+    node.children = 列表()
+
+    /* 消费 '模块' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "模块" 则 {
+        line = tok.行号
+        node.line = line
+        parserConsume(p)
+    }
+
+    /* 获取模块名 */
+    tok = parserPeekToken(p)
+    若 tok.类型 == 0 则 {
+        node.name = tok.值
+        parserConsume(p)
+    }
+
+    /* 消费 '{' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "{" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析模块内容（函数定义列表） */
+    tok = parserPeekToken(p)
+    当 tok.值 != "}" && tok.值 != "" && tok.类型 != 6 则 {
+        若 tok.值 == "函数" 则 {
+            定义 可变 funcNode: AST节点
+            funcNode = parseFunction(p)
+            node.children = funcNode  // 添加函数到模块
+        } 否则 {
+            若 tok.值 == "引入" 则 {
+                定义 可变 importNode: AST节点
+                importNode = parseImportStatement(p)
+                node.children = importNode  // 添加导入到模块
+            } 否则 {
+                parserConsume(p)
+            }
+        }
+        tok = parserPeekToken(p)
+    }
+
+    /* 消费 '}' */
+    若 tok.值 == "}" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+/* 解析枚举定义: 枚举 枚举名 { 成员1, 成员2, 成员3 } */
+函数 parseEnumDefinition(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(22, "", "", line)  // 枚举定义
+    node.children = 列表()
+
+    /* 消费 '枚举' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "枚举" 则 {
+        line = tok.行号
+        node.line = line
+        parserConsume(p)
+    }
+
+    /* 获取枚举名 */
+    tok = parserPeekToken(p)
+    若 tok.类型 == 0 则 {
+        node.name = tok.值
+        parserConsume(p)
+    }
+
+    /* 消费 '{' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "{" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析成员列表 */
+    tok = parserPeekToken(p)
+    当 tok.值 != "}" && tok.值 != "" && tok.类型 != 6 则 {
+        若 tok.类型 == 0 则 {
+            定义 可变 memberNode: AST节点
+            memberNode = parserCreateNode(24, tok.值, "", tok.行号)
+            node.children.追加(memberNode)
+            parserConsume(p)
+
+            /* 消费 ',' || '}' */
+            tok = parserPeekToken(p)
+            若 tok.值 == "," 则 {
+                parserConsume(p)
+            }
+        }
+
+        tok = parserPeekToken(p)
+    }
+
+    /* 消费 '}' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "}" 则 {
+        parserConsume(p)
+    }
+
+    返回 node
+}
+
+/* 解析函数签名: 函数 函数名(参数): 返回类型 */
+函数 parseFunctionSignature(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(1, "", "", line)  // 函数定义
+    node.children = 列表()
+
+    /* 消费 '函数' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "函数" 则 {
+        line = tok.行号
+        parserConsume(p)
+    }
+
+    /* 获取函数名 */
+    tok = parserPeekToken(p)
+    若 tok.类型 == 0 则 {
+        node.name = tok.值
+        parserConsume(p)
+    }
+
+    /* 消费 '(' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "(" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析参数列表 (简化) */
+    tok = parserPeekToken(p)
+    当 tok.值 != ")" && tok.值 != "" && tok.类型 != 6 则 {
+        /* 解析参数名 */
+        若 tok.类型 == 0 则 {
+            parserConsume(p)
+            /* 消费 ':' */
+            tok = parserPeekToken(p)
+            若 tok.值 == ":" 则 {
+                parserConsume(p)
+                /* 消费参数类型 */
+                tok = parserPeekToken(p)
+                若 tok.类型 == 3 则 {
+                    parserConsume(p)
+                }
+            }
+        }
+        /* 消费 ',' */
+        tok = parserPeekToken(p)
+        若 tok.值 == "," 则 {
+            parserConsume(p)
+        }
+        tok = parserPeekToken(p)
+    }
+
+    /* 消费 ')' */
+    tok = parserPeekToken(p)
+    若 tok.值 == ")" 则 {
+        parserConsume(p)
+    }
+
+    /* 消费返回类型 ':' 和类型 */
+    tok = parserPeekToken(p)
+    若 tok.值 == ":" 则 {
+        parserConsume(p)
+        tok = parserPeekToken(p)
+        node.value = tok.值  // 返回类型
+        parserConsume(p)
+    }
+
+    node.line = line
+    返回 node
+}
+
+/* 解析函数定义 */
+函数 parseFunction(p: Parser): AST节点 {
+    /* 解析函数签名 */
+    定义 可变 funcNode: AST节点
+    funcNode = parseFunctionSignature(p)
+
+    /* 解析函数体 */
+    定义 可变 bodyNode: AST节点
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    若 tok.值 == "{" 则 {
+        bodyNode = parseBlock(p)
+    } 否则 {
+        bodyNode = parseExpression(p)
+    }
+
+    打印("解析函数: ")
+    打印(funcNode.name)
+
+    定义 可变 funcChildren: 列表
+    funcChildren = 列表()
+    funcChildren.追加(bodyNode)
+    funcNode.children = funcChildren
+    返回 funcNode
+}
+
+/* ============ 语法错误恢复 ============ */
+
+/**
+ * 报告语法错误
+ */
+函数 parser报告错误(p: Parser, 消息: 文本): 无返回 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    打印("语法错误 (行")
+    打印(tok.行号)
+    打印(", 列")
+    打印(tok.列号)
+    打印("): ")
+    打印(消息)
+}
+
+/**
+ * 跳过到指定 token
+ */
+函数 parser跳过到(p: Parser, target: 文本): 整数 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    当 tok.值 != target && tok.类型 != 6 && tok.值 != "" 则 {
+        parserConsume(p)
+        tok = parserPeekToken(p)
+    }
+
+    若 tok.值 == target 则 {
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 跳过到指定类型
+ */
+函数 parser跳过到类型(p: Parser, 类型: 整数): 整数 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    当 tok.类型 != 类型 && tok.类型 != 6 && tok.值 != "" 则 {
+        parserConsume(p)
+        tok = parserPeekToken(p)
+    }
+
+    若 tok.类型 == 类型 则 {
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 同步到函数开始
+ */
+函数 parser同步到函数(p: Parser): 无返回 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    当 tok.值 != "函数" && tok.类型 != 6 && tok.值 != "" 则 {
+        parserConsume(p)
+        tok = parserPeekToken(p)
+    }
+}
+
+/**
+ * 检查下一个 token 是否为指定值
+ */
+函数 parser预览(p: Parser, 值: 文本): 整数 {
+    定义 可变 savedPos: 整数
+    savedPos = p.pos
+
+    定义 可变 tok: Token
+    tok = parserConsume(p)
+
+    p.pos = savedPos
+
+    若 tok.值 == 值 则 {
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 检查下一个 token 是否为指定类型
+ */
+函数 parser预览类型(p: Parser, 类型: 整数): 整数 {
+    定义 可变 savedPos: 整数
+    savedPos = p.pos
+
+    定义 可变 tok: Token
+    tok = parserConsume(p)
+
+    p.pos = savedPos
+
+    若 tok.类型 == 类型 则 {
+        返回 1
+    }
+    返回 0
+}
+
+/**
+ * 尝试恢复解析
+ */
+函数 parser尝试恢复(p: Parser): 整数 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    /* 常见恢复点 */
+    若 tok.值 == "函数" 则 { 返回 1 }
+    若 tok.值 == "定义" 则 { 返回 1 }
+    若 tok.值 == "若" 则 { 返回 1 }
+    若 tok.值 == "当" 则 { 返回 1 }
+    若 tok.值 == "循环" 则 { 返回 1 }
+    若 tok.值 == "返回" 则 { 返回 1 }
+    若 tok.值 == "{" 则 { 返回 1 }
+    若 tok.值 == "}" 则 { 返回 1 }
+
+    /* 无法恢复 */
+    返回 0
+}
+
+/**
+ * 解析类型注解
+ */
+函数 parseTypeAnnotation(p: Parser): 文本 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    定义 可变 typeName: 文本
+    typeName = ""
+
+    /* 消费 ':' */
+    若 tok.值 == ":" 则 {
+        parserConsume(p)
+        tok = parserPeekToken(p)
+        若 tok.类型 == 3 则 {
+            typeName = tok.值
+            parserConsume(p)
+        }
+    }
+
+    返回 typeName
+}
+
+/**
+ * 解析默认参数值
+ */
+函数 parseDefaultValue(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    定义 可变 defaultNode: AST节点
+    defaultNode = parserCreateNode(14, "", "", tok.行号)
+
+    /* 检查 '=' */
+    若 tok.值 == "=" 则 {
+        parserConsume(p)
+        defaultNode = parseExpression(p)
+    }
+
+    返回 defaultNode
+}
+
+/**
+ * 解析参数列表
+ */
+函数 parseParameterList(p: Parser): 列表 {
+    定义 可变 params: 列表
+    params = 列表()
+
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    /* 消费 '(' */
+    若 tok.值 == "(" 则 {
+        parserConsume(p)
+    }
+
+    /* 解析参数 */
+    tok = parserPeekToken(p)
+    当 tok.值 != ")" && tok.值 != "" && tok.类型 != 6 则 {
+        /* 获取参数名 */
+        若 tok.类型 == 0 则 {
+            定义 可变 paramNode: AST节点
+            paramNode = parserCreateNode(2, tok.值, "", tok.行号)
+            parserConsume(p)
+
+            /* 解析类型注解 */
+            tok = parserPeekToken(p)
+            若 tok.值 == ":" 则 {
+                parserConsume(p)
+                tok = parserPeekToken(p)
+                若 tok.类型 == 3 则 {
+                    paramNode.value = tok.值
+                    parserConsume(p)
+                }
+            }
+
+            /* 解析默认值 */
+            tok = parserPeekToken(p)
+            若 tok.值 == "=" 则 {
+                定义 可变 defaultVal: AST节点
+                defaultVal = parseDefaultValue(p)
+                paramNode.children = defaultVal
+            }
+        }
+
+        /* 消费 ',' */
+        tok = parserPeekToken(p)
+        若 tok.值 == "," 则 {
+            parserConsume(p)
+        }
+
+        tok = parserPeekToken(p)
+    }
+
+    /* 消费 ')' */
+    若 tok.值 == ")" 则 {
+        parserConsume(p)
+    }
+
+    返回 params
+}
+
+/**
+ * 解析特性注解
+ */
+函数 parseAttribute(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    定义 可变 attrNode: AST节点
+    attrNode = parserCreateNode(0, "", "", tok.行号)
+
+    /* 消费 '@' */
+    若 tok.值 == "@" 则 {
+        parserConsume(p)
+        tok = parserPeekToken(p)
+        attrNode.name = tok.值
+        parserConsume(p)
+
+        /* 消费 '(' 如果有参数 */
+        tok = parserPeekToken(p)
+        若 tok.值 == "(" 则 {
+            parserConsume(p)
+            tok = parserPeekToken(p)
+            当 tok.值 != ")" && tok.值 != "" 则 {
+                parserConsume(p)
+                tok = parserPeekToken(p)
+            }
+            若 tok.值 == ")" 则 {
+                parserConsume(p)
+            }
+        }
+    }
+
+    返回 attrNode
+}
+
+/**
+ * 解析 where 子句
+ */
+函数 parseWhereClause(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    定义 可变 whereNode: AST节点
+    whereNode = parserCreateNode(0, "", "", tok.行号)
+
+    /* 消费 'where' */
+    若 tok.值 == "where" 则 {
+        parserConsume(p)
+        /* 解析约束条件 */
+        tok = parserPeekToken(p)
+        当 tok.值 != "{" && tok.值 != "" && tok.类型 != 6 则 {
+            parserConsume(p)
+            tok = parserPeekToken(p)
+        }
+    }
+
+    返回 whereNode
+}
+
+/* ============ 错误恢复机制 ============ */
+
+/**
+ * 创建错误恢复上下文
+ */
+函数 parser创建错误恢复(): ErrorRecovery {
+    定义 可变 recovery: ErrorRecovery
+    recovery.已恢复 = 0
+    recovery.跳过Token数 = 0
+    recovery.恢复点 = 0
+    返回 recovery
+}
+
+/**
+ * 找到同步恢复点
+ */
+函数 parser找到恢复点(p: Parser): 整数 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    /* 优先级恢复点 */
+    若 tok.值 == "函数" 则 { 返回 1 }
+    若 tok.值 == "定义" 则 { 返回 1 }
+    若 tok.值 == "若" 则 { 返回 1 }
+    若 tok.值 == "当" 则 { 返回 1 }
+    若 tok.值 == "循环" 则 { 返回 1 }
+    若 tok.值 == "返回" 则 { 返回 1 }
+    若 tok.值 == "{" 则 { 返回 1 }
+    若 tok.值 == "}" 则 { 返回 1 }
+    若 tok.值 == "结构体" 则 { 返回 1 }
+    若 tok.值 == "枚举" 则 { 返回 1 }
+    若 tok.值 == "模块" 则 { 返回 1 }
+    若 tok.值 == "导入" 则 { 返回 1 }
+
+    返回 0
+}
+
+/**
+ * 跳过错误token直到恢复点
+ */
+函数 parser跳过到恢复点(p: Parser): Parser {
+    定义 可变 recovery: ErrorRecovery
+    recovery = parser创建错误恢复()
+
+    当 p.pos < p.tokenCount && recovery.已恢复 == 0 则 {
+        定义 可变 tok: Token
+        tok = parserPeekToken(p)
+
+        若 parser找到恢复点(p) == 1 则 {
+            recovery.已恢复 = 1
+        } 否则 {
+            parserConsume(p)
+            recovery.跳过Token数 = recovery.跳过Token数 + 1
+        }
+    }
+
+    返回 p
+}
+
+/**
+ * 报告解析错误并尝试恢复
+ */
+函数 parser错误报告恢复(p: Parser, 消息: 文本): Parser {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    打印("解析错误 [行 ")
+    打印(tok.行号)
+    打印("]: ")
+    打印(消息)
+
+    /* 尝试恢复 */
+    p = parser跳过到恢复点(p)
+
+    返回 p
+}
+
+/**
+ * 检查是否需要插入缺失的 token
+ */
+函数 parser检查缺失Token(p: Parser, expected: 文本): 整数 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    若 tok.值 == expected 则 {
+        返回 1
+    }
+
+    打印("警告: 期望 '")
+    打印(expected)
+    打印("'，实际 '")
+    打印(tok.值)
+    打印("'")
+
+    返回 0
+}
+
+/**
+ * 插入缺失的 token
+ */
+函数 parser插入缺失Token(p: Parser, tokenType: 整数, tokenValue: 文本): Token {
+    定义 可变 inserted: Token
+    inserted.类型 = tokenType
+    inserted.值 = tokenValue
+    inserted.行号 = p.当前行号
+    inserted.列号 = p.当前列号
+    inserted.开始位置 = p.当前位置
+    inserted.结束位置 = p.当前位置
+
+    打印("插入缺失 token: ")
+    打印(tokenValue)
+
+    返回 inserted
+}
+
+/**
+ * 同步到函数边界
+ */
+函数 parser同步到函数(p: Parser): Parser {
+    定义 可变 depth: 整数
+    depth = 0
+
+    当 p.当前位置 < p.源码长度 则 {
+        定义 可变 tok: Token
+        tok = parserPeekToken(p)
+
+        若 tok.值 == "函数" && depth == 0 则 {
+            返回 p
+        }
+
+        若 tok.值 == "{" 则 {
+            depth = depth + 1
+        } 否则 {
+            若 tok.值 == "}" 则 {
+                depth = depth - 1
+            }
+        }
+
+        parserConsume(p)
+    }
+
+    返回 p
+}
+
+/**
+ * 同步到语句边界
+ */
+函数 parser同步到语句(p: Parser): Parser {
+    当 p.当前位置 < p.源码长度 则 {
+        定义 可变 tok: Token
+        tok = parserPeekToken(p)
+
+        /* 语句开始关键字 */
+        若 tok.值 == "若" 则 { 返回 p }
+        若 tok.值 == "当" 则 { 返回 p }
+        若 tok.值 == "循环" 则 { 返回 p }
+        若 tok.值 == "定义" 则 { 返回 p }
+        若 tok.值 == "返回" 则 { 返回 p }
+        若 tok.值 == "打印" 则 { 返回 p }
+        若 tok.值 == "{" 则 { 返回 p }
+        若 tok.值 == "}" 则 { 返回 p }
+        若 tok.类型 == 6 则 { 返回 p }
+
+        parserConsume(p)
+    }
+
+    返回 p
+}
+
+/**
+ * 解析器 panic 模式恢复
+ */
+函数 parserPanic恢复(p: Parser): Parser {
+    打印("进入 panic 模式恢复...")
+
+    p = parser同步到函数(p)
+
+    打印("panic 模式恢复完成")
+
+    返回 p
+}
+
+/**
+ * 记录解析边界
+ */
+函数 parser记录边界(p: Parser): 无返回 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+    打印("解析位置: 行 ")
+    打印(tok.行号)
+    打印(", 列 ")
+    打印(tok.列号)
+}
+
+/**
+ * 解析器诊断信息
+ */
+函数 parser诊断(p: Parser): 无返回 {
+    打印("=== 解析器诊断 ===")
+    打印("  当前位置: ")
+    打印(p.pos)
+    打印("/")
+    打印(p.tokenCount)
+    打印("  节点计数: ")
+    打印(p.nodeCount)
+    打印("  错误列表长度: ")
+    打印(列表长度(p.errors))
+}
+
+/**
+ * 打印 AST 节点（递归）
+ */
+函数 打印AST节点(node: AST节点, 缩进: 整数): 无返回 {
+    定义 可变 i: 整数
+    i = 0
+
+    /* 打印缩进 */
+    当 i < 缩进 则 {
+        打印("  ")
+        i = i + 1
+    }
+
+    /* 打印节点类型 */
+    定义 可变 类型名: 文本
+    类型名 = ""
+    若 node.kind == 0 则 { 类型名 = "程序" }
+    若 node.kind == 1 则 { 类型名 = "函数定义" }
+    若 node.kind == 2 则 { 类型名 = "参数列表" }
+    若 node.kind == 3 则 { 类型名 = "变量定义" }
+    若 node.kind == 4 则 { 类型名 = "赋值语句" }
+    若 node.kind == 5 则 { 类型名 = "if语句" }
+    若 node.kind == 6 则 { 类型名 = "while语句" }
+    若 node.kind == 7 则 { 类型名 = "循环语句" }
+    若 node.kind == 8 则 { 类型名 = "返回语句" }
+    若 node.kind == 9 则 { 类型名 = "表达式语句" }
+    若 node.kind == 10 则 { 类型名 = "二元表达式" }
+    若 node.kind == 11 则 { 类型名 = "一元表达式" }
+    若 node.kind == 12 则 { 类型名 = "调用表达式" }
+    若 node.kind == 13 则 { 类型名 = "标识符表达式" }
+    若 node.kind == 14 则 { 类型名 = "字面量表达式" }
+    若 node.kind == 15 则 { 类型名 = "类型转换" }
+    若 node.kind == 16 则 { 类型名 = "break语句" }
+    若 node.kind == 17 则 { 类型名 = "continue语句" }
+    若 node.kind == 18 则 { 类型名 = "块语句" }
+    若 node.kind == 19 则 { 类型名 = "赋值表达式" }
+    若 node.kind == 20 则 { 类型名 = "for循环" }
+    若 node.kind == 21 则 { 类型名 = "结构体定义" }
+    若 node.kind == 22 则 { 类型名 = "枚举定义" }
+    若 node.kind == 23 则 { 类型名 = "结构体字段" }
+    若 node.kind == 24 则 { 类型名 = "枚举成员" }
+    若 node.kind == 25 则 { 类型名 = "match语句" }
+    若 node.kind == 26 则 { 类型名 = "match分支" }
+    若 node.kind == 27 则 { 类型名 = "match默认分支" }
+    若 node.kind == 28 则 { 类型名 = "导入语句" }
+    若 node.kind == 29 则 { 类型名 = "模块定义" }
+    若 node.kind == 30 则 { 类型名 = "外部声明" }
+
+    打印("[")
+    打印(类型名)
+    打印("]")
+
+    若 node.name != "" 则 {
+        打印(" 名称: ")
+        打印(node.name)
+    }
+
+    若 node.value != "" 则 {
+        打印(" 值: '")
+        打印(node.value)
+        打印("'")
+    }
+
+    若 node.line > 0 则 {
+        打印(" 行: ")
+        打印(node.line)
+    }
+
+    打印("")
+
+    /* 递归打印子节点 */
+    定义 可变 childCount: 整数
+    childCount = 列表长度(node.children)
+    i = 0
+    当 i < childCount 则 {
+        定义 可变 child: AST节点
+        child = 列表获取(node.children, i)
+        打印AST节点(child, 缩进 + 1)
+        i = i + 1
+    }
+}
+
+/**
+ * 打印完整的 AST
+ */
+函数 打印AST(root: AST节点): 无返回 {
+    打印("=== AST 树 ===")
+    打印AST节点(root, 0)
+    打印("=== AST 结束 ===")
+}
+
+/* ============ 解析统计和调试 ============ */
+
+/**
+ * 获取解析统计信息
+ */
+函数 parser获取统计(p: Parser): 列表 {
+    定义 可变 stats: 列表
+    stats = 列表()
+    返回 stats
+}
+
+/**
+ * 打印解析进度
+ */
+函数 parser打印进度(p: Parser): 无返回 {
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    详细输出("解析进度: 位置=")
+    详细输出(整数转文本(p.pos))
+    详细输出("/")
+    详细输出(整数转文本(p.tokenCount))
+    详细输出(", 当前Token=")
+    详细输出(tok.值)
+}
+
+/**
+ * 验证解析器状态
+ */
+函数 parser验证状态(p: Parser): 整数 {
+    若 p.pos < 0 则 { 返回 0 }
+    若 p.pos > p.tokenCount 则 { 返回 0 }
+    返回 1
+}
+
+/* ============ 主解析循环 ============ */
+
+函数 parserRun(tokens: 列表): 整数 {
+    打印("=== 语法分析 ===")
+
+    定义 可变 p: Parser
+    p = parserInit(tokens)
+
+    定义 可变 funcCount: 整数
+    funcCount = 0
+
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    /* 循环解析直到文件结束 */
+    当 tok.类型 != 6 && tok.值 != "" && funcCount < 100 则 {
+        若 tok.值 == "函数" 则 {
+            定义 可变 funcNode: AST节点
+            funcNode = parseFunction(p)
+            funcCount = funcCount + 1
+        } 否则 {
+            若 tok.值 == "结构体" 则 {
+                定义 可变 structNode: AST节点
+                structNode = parseStructDefinition(p)
+                打印("解析结构体: ")
+                打印(structNode.name)
+            } 否则 {
+                若 tok.值 == "枚举" 则 {
+                    定义 可变 enumNode: AST节点
+                    enumNode = parseEnumDefinition(p)
+                    打印("解析枚举: ")
+                    打印(enumNode.name)
+                } 否则 {
+                    若 tok.值 == "引入" 则 {
+                        定义 可变 importNode: AST节点
+                        importNode = parseImportStatement(p)
+                        打印("解析导入: ")
+                        打印(importNode.name)
+                    } 否则 {
+                        若 tok.值 == "模块" 则 {
+                            定义 可变 moduleNode: AST节点
+                            moduleNode = parseModuleDefinition(p)
+                            打印("解析模块: ")
+                            打印(moduleNode.name)
+                        } 否则 {
+                            /* 跳过未知 token */
+                            parserConsume(p)
+                        }
+                    }
+                }
+            }
+        }
+
+        tok = parserPeekToken(p)
+    }
+
+    打印("语法分析完成，共解析 ")
+    打印(funcCount)
+    打印(" 个函数")
+    打印("生成 ")
+    打印(p.nodeCount)
+    打印(" 个 AST 节点")
+
+    返回 funcCount
+}
+
+/* ============ AST 构建入口函数 ============ */
+
+/**
+ * 分析 Token 列表并返回 AST 根节点
+ * 这是解析器的外部入口函数
+ */
+函数 parser分析Tokens(tokens: 列表, source: 文本): AST节点 {
+    定义 可变 p: Parser
+    p = parserInit(tokens)
+
+    定义 可变 progNode: AST节点
+    progNode = parserCreateNode(0, "程序", "", 0)  // kind=0 表示程序节点
+    progNode.children = 列表()
+
+    定义 可变 tok: Token
+    tok = parserPeekToken(p)
+
+    /* 循环解析直到文件结束 */
+    当 tok.类型 != 6 && tok.值 != "" 则 {
+        若 tok.值 == "函数" 则 {
+            定义 可变 funcNode: AST节点
+            funcNode = parseFunction(p)
+            progNode.children.追加(funcNode)
+        } 否则 {
+            若 tok.值 == "结构体" 则 {
+                定义 可变 structNode: AST节点
+                structNode = parseStructDefinition(p)
+                progNode.children.追加(structNode)
+            } 否则 {
+                若 tok.值 == "枚举" 则 {
+                    定义 可变 enumNode: AST节点
+                    enumNode = parseEnumDefinition(p)
+                    progNode.children.追加(enumNode)
+                } 否则 {
+                    若 tok.值 == "引入" 则 {
+                        定义 可变 importNode: AST节点
+                        importNode = parseImportStatement(p)
+                        progNode.children.追加(importNode)
+                    } 否则 {
+                        若 tok.值 == "模块" 则 {
+                            定义 可变 moduleNode: AST节点
+                            moduleNode = parseModuleDefinition(p)
+                            progNode.children.追加(moduleNode)
+                        } 否则 {
+                            若 tok.值 == "外部" 则 {
+                                定义 可变 externalNode: AST节点
+                                externalNode = parseExternalDeclaration(p)
+                                progNode.children.追加(externalNode)
+                            } 否则 {
+                                /* 跳过未知 token */
+                                parserConsume(p)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        tok = parserPeekToken(p)
+    }
+
+    返回 progNode
+}
+
+/* ============ 外部声明解析 ============ */
+
+/**
+ * 解析外部函数声明
+ * 语法: 外部 "C函数名"
+ */
+函数 parseExternalDeclaration(p: Parser): AST节点 {
+    定义 可变 tok: Token
+    定义 可变 line: 整数
+    line = 0
+
+    定义 可变 node: AST节点
+    node = parserCreateNode(30, "", "", line)
+    node.children = 列表()
+
+    /* 消费 '外部' */
+    tok = parserPeekToken(p)
+    若 tok.值 == "外部" 则 {
+        line = tok.行号
+        node.line = line
+        parserConsume(p)
+    }
+
+    /* 获取函数名字符串 */
+    tok = parserPeekToken(p)
+    若 tok.类型 == 2 则 {
+        node.name = tok.值
+        parserConsume(p)
+    }
+
+    返回 node
+}

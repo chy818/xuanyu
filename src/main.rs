@@ -98,11 +98,11 @@ enum RunMode {
 }
 
 fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
-    // 检查是否是多文件编译
+    // 默认使用多文件编译（支持引入解析）
     let is_multi_file = filename.ends_with(".xy") && Path::new(filename).exists();
-    
+
     if is_multi_file {
-        // 多文件编译
+        // 多文件编译（自动解析引入语句）
         compile_multi_file(filename, mode)
     } else {
         // 单文件编译
@@ -385,7 +385,7 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
 
     // 创建多文件编译器
     let mut compiler = MultiFileCompiler::new();
-    
+
     // 添加文件所在目录作为搜索路径
     let file_path = Path::new(filename);
     if let Some(dir) = file_path.parent() {
@@ -412,16 +412,51 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
         }
     }
 
-    // 生成合并的 IR
-    let mut combined_ir = String::new();
-    
-    for module in &modules {
-        // 为每个模块生成 IR
-        let ir = xuanyu::generate_ir(&module.module)
-            .map_err(|e| format!("代码生成错误: {}", e.message))?;
-        combined_ir.push_str(&ir);
-        combined_ir.push_str("\n");
+    // 将所有模块合并为一个模块，然后一次性生成 IR
+    // 这样可以避免重复的运行时声明和外部函数声明
+    let mut merged_module = modules[0].module.clone();
+    for module in &modules[1..] {
+        // 合并函数（去重：按函数名去重）
+        for func in &module.module.functions {
+            if !merged_module.functions.iter().any(|f| f.name == func.name) {
+                merged_module.functions.push(func.clone());
+            }
+        }
+        // 合并结构体（去重）
+        for s in &module.module.structs {
+            if !merged_module.structs.iter().any(|f| f.name == s.name) {
+                merged_module.structs.push(s.clone());
+            }
+        }
+        // 合并枚举（去重）
+        for e in &module.module.enums {
+            if !merged_module.enums.iter().any(|f| f.name == e.name) {
+                merged_module.enums.push(e.clone());
+            }
+        }
+        // 合并外部函数声明（去重：按函数名去重）
+        for ext in &module.module.extern_functions {
+            if !merged_module.extern_functions.iter().any(|e| e.name == ext.name) {
+                merged_module.extern_functions.push(ext.clone());
+            }
+        }
+        // 合并常量（去重）
+        for c in &module.module.constants {
+            if !merged_module.constants.iter().any(|f| f.name == c.name) {
+                merged_module.constants.push(c.clone());
+            }
+        }
+        // 合并导入（去重）
+        for imp in &module.module.imports {
+            if !merged_module.imports.iter().any(|i| i.module_path == imp.module_path) {
+                merged_module.imports.push(imp.clone());
+            }
+        }
     }
+
+    // 一次性生成合并后的 IR
+    let combined_ir = xuanyu::generate_ir(&merged_module)
+        .map_err(|e| format!("代码生成错误: {}", e.message))?;
 
     if mode != RunMode::IrPure {
         println!("\n=== 代码生成 ===");
