@@ -456,12 +456,16 @@
 }
 
 /* 解析索引访问表达式 */
+/* 索引访问: base[index] -> children[0]=base, children[1]=index */
 函数 parseIndexAccess(p: Parser, base: AST节点): AST节点 {
     定义 可变 tok: Token
     tok = parserPeekToken(p)
 
     定义 可变 node: AST节点
-    node = parserCreateNode(0, "", "", tok.行号)
+    node = parserCreateNode(15, "", "", tok.行号)  // 复用类型转换节点kind=15
+    node.children = 列表()
+    node.children.追加(base)  // children[0] = 被索引对象
+    node.children.追加(空节点)  // children[1] = 索引（稍后填充）
 
     /* 消费 '[' */
     若 tok.值 == "[" 则 {
@@ -477,9 +481,8 @@
             parserConsume(p)
         }
 
-        node.kind = 15  // 类型转换节点（复用）
-        node.name = "索引访问"
-        node.children = index
+        /* 设置索引 */
+        node.children[1] = index
     }
 
     返回 node
@@ -821,6 +824,10 @@
 }
 
 /* 解析 if 语句 */
+/* 支持: 若 expr 则 { ... }
+ *       若 expr 则 { ... } 否则若 expr 则 { ... }
+ *       若 expr 则 { ... } 否则 { ... }
+ */
 函数 parseIfStatement(p: Parser): AST节点 {
     定义 可变 tok: Token
     定义 可变 line: 整数
@@ -858,16 +865,23 @@
     }
     node.children.追加(thenNode)
 
-    /* 检查 '否则' */
+    /* 检查 '否则' 或 '否则若' */
     tok = parserPeekToken(p)
     定义 可变 elseNode: AST节点
     elseNode = parserCreateNode(0, "", "", line)
-    若 tok.值 == "否则" 则 {
+    
+    若 tok.值 == "否则若" 则 {
+        /* 否则若 - 递归解析嵌套的 if 语句 */
         parserConsume(p)
+        elseNode = parseIfStatement(p)
+    } 否则 若 tok.值 == "否则" 则 {
+        parserConsume(p)
+        /* 解析普通 else 块 */
         tok = parserPeekToken(p)
         若 tok.值 == "{" 则 {
             elseNode = parseBlock(p)
         } 否则 {
+            /* 否则后是单语句（简化处理，解析为表达式） */
             elseNode = parseExpression(p)
         }
     }

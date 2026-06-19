@@ -933,10 +933,10 @@ impl Parser {
 
     /**
      * 解析返回类型
-     * 返回类型 -> ':' 类型
+     * 返回类型 -> (':' | '->') 类型
      */
     fn parse_return_type(&mut self) -> Result<Type, ParserError> {
-        if self.match_token(&TokenType::冒号) {
+        if self.match_token(&TokenType::冒号) || self.match_token(&TokenType::箭头) {
             self.parse_type()
         } else {
             Ok(Type::Void) // 默认无返回
@@ -1400,6 +1400,30 @@ impl Parser {
             } else {
                 Some(Box::new(self.parse_statement()?))
             }
+        } else if self.match_keyword(&Keyword::否则若) {
+            // '否则若' 作为单个 token - 继续解析条件（不需要再次消费 '若'）
+            let condition = self.parse_expression()?;
+            self.expect(&TokenType::Keyword(Keyword::则))?;
+            let then_branch = Box::new(self.parse_statement()?);
+            
+            // 递归检查后续的否则若/否则
+            let nested_else = if self.match_keyword(&Keyword::否则) {
+                if self.check_keyword(&Keyword::若) {
+                    Some(Box::new(self.parse_if_statement()?))
+                } else {
+                    Some(Box::new(self.parse_statement()?))
+                }
+            } else if self.match_keyword(&Keyword::否则若) {
+                Some(Box::new(self.parse_if_statement()?))
+            } else {
+                None
+            };
+            
+            Some(Box::new(Stmt::If(IfStmt::new(
+                vec![Branch { condition, body: then_branch }],
+                nested_else,
+                start_span
+            ))))
         } else {
             None
         };
@@ -2218,10 +2242,38 @@ impl Parser {
         let result = match &token.token_type {
             // 标识符
             TokenType::标识符 => {
-                let name = token.literal.clone();
-                let span = token.span;
+                let mut expr = Expr::Identifier(IdentifierExpr::new(token.literal.clone(), token.span));
+                let mut span = token.span;
                 self.position += 1;
-                Ok(Expr::Identifier(IdentifierExpr::new(name, span)))
+                
+                // 处理模块路径: 模块名::函数名
+                while self.match_token(&TokenType::双冒号) {
+                    // 期望标识符
+                    let next_token = self.current()
+                        .ok_or_else(|| ParserError::unexpected_token_at(1, 1, "期望模块成员名"))?;
+                    
+                    let member_name = match next_token.token_type {
+                        TokenType::标识符 => next_token.literal.clone(),
+                        TokenType::Keyword(_) => next_token.literal.clone(),
+                        _ => return Err(ParserError::unexpected_token(
+                            "模块成员名",
+                            &next_token.literal,
+                            next_token.span
+                        )),
+                    };
+                    
+                    span = span.merge(next_token.span);
+                    self.position += 1;
+                    
+                    // 创建成员访问表达式
+                    expr = Expr::MemberAccess(MemberAccessExpr::new(
+                        Box::new(expr),
+                        member_name,
+                        span
+                    ));
+                }
+                
+                Ok(expr)
             }
 
             // Lambda 表达式: 函数(参数) => 表达式

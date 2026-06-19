@@ -1180,6 +1180,14 @@ impl SemanticAnalyzer {
                             Type::Any
                         }
                     }
+                    Type::List(_) => {
+                        // 处理列表方法
+                        if member_name == "获取" || member_name == "append" || member_name == "set" || member_name == "len" {
+                            Type::Any
+                        } else {
+                            Type::Any
+                        }
+                    }
                     _ => Type::Any,
                 };
 
@@ -1617,9 +1625,27 @@ impl SemanticAnalyzer {
             return Ok(Type::Unknown)
         }
 
-        // TODO: 检查参数类型匹配
+        // 处理 MemberAccess 表达式
+        if let Expr::MemberAccess(member) = &*call.function {
+            // 分析对象表达式
+            let object_type = self.analyze_expression(&member.object)?;
+            let member_name = &member.member;
 
-        Ok(Type::Int) // 简化返回 int
+            // 处理列表方法
+            if let Type::List(_) = object_type {
+                if member_name == "获取" {
+                    // 列表.获取() 应该返回列表元素类型，暂时返回 Any
+                    return Ok(Type::Any);
+                } else if member_name == "append" {
+                    return Ok(Type::Void);
+                } else if member_name == "len" {
+                    return Ok(Type::Int);
+                }
+            }
+        }
+
+        // 简化返回 Any，由调用者决定具体类型
+        Ok(Type::Any)
     }
     
     /**

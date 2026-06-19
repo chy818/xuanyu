@@ -503,7 +503,12 @@ impl Lexer {
             }
             '-' => {
                 self.advance();
-                Token::new(TokenType::减, "-".to_string(), self.make_span(start_line, start_column))
+                if self.current_char() == Some('>') {
+                    self.advance();
+                    Token::new(TokenType::箭头, "->".to_string(), self.make_span(start_line, start_column))
+                } else {
+                    Token::new(TokenType::减, "-".to_string(), self.make_span(start_line, start_column))
+                }
             }
             '*' => {
                 self.advance();
@@ -664,7 +669,12 @@ impl Lexer {
             }
             ':' => {
                 self.advance();
-                Token::new(TokenType::冒号, ":".to_string(), self.make_span(start_line, start_column))
+                if self.current_char() == Some(':') {
+                    self.advance();
+                    Token::new(TokenType::双冒号, "::".to_string(), self.make_span(start_line, start_column))
+                } else {
+                    Token::new(TokenType::冒号, ":".to_string(), self.make_span(start_line, start_column))
+                }
             }
 
             // 换行符 - 允许作为语句分隔

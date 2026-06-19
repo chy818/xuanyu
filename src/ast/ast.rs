@@ -1126,6 +1126,8 @@ pub struct Function {
     pub span: Span,
     /// 是否是异步函数
     pub is_async: bool,
+    /// 是否是外部函数（仅声明，不定义）
+    pub is_external: bool,
 }
 
 impl Function {
@@ -1139,6 +1141,7 @@ impl Function {
             body,
             span,
             is_async: false,
+            is_external: false,
         }
     }
 
@@ -1153,6 +1156,7 @@ impl Function {
             body,
             span,
             is_async: false,
+            is_external: false,
         }
     }
 
@@ -1169,6 +1173,23 @@ impl Function {
             body,
             span,
             is_async: true,
+            is_external: false,
+        }
+    }
+
+    /**
+     * 创建外部函数（仅声明，不定义）
+     */
+    pub fn external(name: String, params: Vec<FunctionParam>, return_type: Type, span: Span) -> Self {
+        Self {
+            name,
+            type_params: Vec::new(),
+            params,
+            return_type,
+            body: BlockStmt::new(Vec::new(), span),
+            span,
+            is_async: false,
+            is_external: true,
         }
     }
 

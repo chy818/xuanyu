@@ -5,6 +5,7 @@
  */
 
 pub mod incremental;
+pub mod module;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -378,5 +379,9 @@ impl Default for Compiler {
 
 pub use incremental::{
     IncrementalCompiler, IncrementalResult, CompileTask,
-    FileChange, ModuleInfo, BuildStats,
+    FileChange, BuildStats,
+};
+
+pub use module::{
+    ModuleInfo, MultiFileCompiler,
 };

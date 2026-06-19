@@ -10,8 +10,11 @@ if (-not (Test-Path "target\l2_compiler")) {
 # LLVM 工具链路径
 $LLVM_PATH = "C:\Program Files\LLVM\bin"
 $LLC_EXE = "$LLVM_PATH\llc.exe"
-$CL_EXE = "$LLVM_PATH\clang.exe"
-$LINK_EXE = "$LLVM_PATH\lld-link.exe"
+$CLANG_EXE = "$LLVM_PATH\clang.exe"
+
+# MinGW 路径
+$MINGW_BIN = "C:\msys64\mingw64\bin"
+$GCC_EXE = "$MINGW_BIN\gcc.exe"
 
 $MODULES = @("runtime.xy", "lexer.xy", "parser.xy", "sema.xy", "codegen.xy", "utils.xy", "main.xy")
 
@@ -29,26 +32,27 @@ foreach ($module in $MODULES) {
     Write-Host ""
 }
 
-Write-Host "[2] Compiling IR to object files..."
+Write-Host "[2] Compiling IR to native object files..."
 Write-Host ""
 
 foreach ($module in $MODULES) {
-    Write-Host "Assembling $module.ll..."
-    & $LLC_EXE "target\l2_compiler\$module.ll" -filetype=obj -o "target\l2_compiler\$module.obj"
+    Write-Host "Compiling $module.ll to object file..."
+    # 使用 clang 作为集成汇编器，它可以处理 SEH 指令
+    & $CLANG_EXE -c -O2 "target\l2_compiler\$module.ll" -o "target\l2_compiler\$module.obj"
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "Failed to assemble $module.ll!"
+        Write-Host "Failed to compile $module.ll!"
         exit 1
     }
-    Write-Host "Assembled $module.ll successfully"
+    Write-Host "Compiled $module.ll successfully"
     Write-Host ""
 }
 
 Write-Host "[3] Compiling C runtime library..."
 Write-Host ""
 
-# 使用 clang 替代 cl 编译 runtime.c
-# 添加 -w 选项抑制所有警告以减少干扰
-& $CL_EXE -c -O2 -w "runtime\runtime.c" -o "target\l2_compiler\runtime.obj"
+# 设置 PATH 以便找到 MinGW 的 gcc
+$env:PATH = "$MINGW_BIN;$env:PATH"
+& $GCC_EXE -c -O2 -w "runtime\runtime.c" -o "target\l2_compiler\runtime.obj"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Failed to compile runtime.c!"
     exit 1
@@ -59,21 +63,10 @@ Write-Host ""
 Write-Host "[4] Linking to generate L2 compiler..."
 Write-Host ""
 
-$OBJS = @(
-    "target\l2_compiler\runtime.xy.obj",
-    "target\l2_compiler\lexer.xy.obj",
-    "target\l2_compiler\parser.xy.obj",
-    "target\l2_compiler\sema.xy.obj",
-    "target\l2_compiler\codegen.xy.obj",
-    "target\l2_compiler\utils.xy.obj",
-    "target\l2_compiler\main.xy.obj",
-    "target\l2_compiler\runtime.obj"
-)
-
-# 使用 lld-link 进行链接
-# /FORCE 允许重复符号，强制生成可执行文件
-# 添加 /MANIFEST:NO 避免嵌入清单导致的问题
-& $LINK_EXE -OUT:"target\l2_compiler\xyc.exe" $OBJS "/FORCE" "/MANIFEST:NO"
+# 使用 MinGW 的 gcc 进行链接
+# -Wl,-e,main 指定入口点为 main 函数
+$env:PATH = "$MINGW_BIN;$env:PATH"
+& $GCC_EXE -O2 "target\l2_compiler\runtime.xy.obj" "target\l2_compiler\lexer.xy.obj" "target\l2_compiler\parser.xy.obj" "target\l2_compiler\sema.xy.obj" "target\l2_compiler\codegen.xy.obj" "target\l2_compiler\utils.xy.obj" "target\l2_compiler\main.xy.obj" "target\l2_compiler\runtime.obj" -o "target\l2_compiler\xyc.exe" "-Wl,--allow-multiple-definition" "-Wl,-e,main"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Linking failed!"
     exit 1

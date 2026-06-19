@@ -6,9 +6,11 @@
 
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 use std::time::SystemTime;
+
+use xuanyu::compiler::{MultiFileCompiler, ModuleInfo};
 
 #[cfg(target_os = "windows")]
 fn setup_windows_console() {
@@ -96,6 +98,19 @@ enum RunMode {
 }
 
 fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
+    // 检查是否是多文件编译
+    let is_multi_file = filename.ends_with(".xy") && Path::new(filename).exists();
+    
+    if is_multi_file {
+        // 多文件编译
+        compile_multi_file(filename, mode)
+    } else {
+        // 单文件编译
+        compile_single_file(filename, mode)
+    }
+}
+
+fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
     // 读取源文件
     let source = fs::read_to_string(filename)
         .map_err(|e| format!("无法读取文件 '{}': {}", filename, e))?;
@@ -210,20 +225,20 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
             println!("\n=== 生成对象文件 ===");
             let temp_obj = "temp_output.o";
             
+            // 执行 llc 命令
             let llc_result = Command::new("llc")
                 .arg(&temp_ir)
                 .arg("-filetype=obj")
                 .arg("-o")
                 .arg(temp_obj)
-                .output();
+                .status();
 
             match llc_result {
-                Ok(output) => {
-                    if !output.status.success() {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
+                Ok(status) => {
+                    if !status.success() {
                         // 保留 IR 文件用于调试
                         eprintln!("IR 文件保存在: {}", temp_ir);
-                        return Err(format!("llc 执行失败: {}", stderr));
+                        return Err(format!("llc 执行失败，退出码: {}", status.code().unwrap_or(-1)));
                     }
                 }
                 Err(e) => {
@@ -269,25 +284,47 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
                 "output"
             };
 
-            let linker_result = Command::new("clang")
+            // 编译 runtime.c 为目标文件
+            let runtime_obj = "runtime.obj";
+            let compile_runtime_result = Command::new("clang")
+                .arg("-c")
                 .arg(runtime_path)
+                .arg("-o")
+                .arg(runtime_obj)
+                .status();
+
+            match compile_runtime_result {
+                Ok(status) => {
+                    if !status.success() {
+                        cleanup(&temp_ir, temp_obj);
+                        return Err(format!("编译 runtime.c 失败，退出码: {}", status.code().unwrap_or(-1)));
+                    }
+                }
+                Err(e) => {
+                    cleanup(&temp_ir, temp_obj);
+                    return Err(format!("无法执行 clang: {}\n请确保已安装 Clang/LLVM 并配置环境变量.", e));
+                }
+            }
+
+            let linker_result = Command::new("clang")
+                .arg(runtime_obj)
                 .arg(temp_obj)
                 .arg("-o")
                 .arg(output_exe)
-                .output();
+                .arg("-Wl,/SUBSYSTEM:console")
+                .status();
 
             match linker_result {
-                Ok(output) => {
-                    if !output.status.success() {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
+                Ok(status) => {
+                    if !status.success() {
                         cleanup(&temp_ir, temp_obj);
-                        return Err(format!("链接失败: {}", stderr));
+                        return Err(format!("链接失败，退出码: {}", status.code().unwrap_or(-1)));
                     }
                 }
                 Err(e) => {
                     let _ = fs::remove_file(&temp_ir);
                     let _ = fs::remove_file(temp_obj);
-                    return Err(format!("无法执行 clang: {}\n请确保已安装 Clang/LLVM 并配置环境变量。", e));
+                    return Err(format!("无法执行 clang: {}\n请确保已安装 Clang/LLVM 并配置环境变量.", e));
                 }
             }
 
@@ -340,9 +377,234 @@ fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
     Ok(())
 }
 
+fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
+    // 如果是纯 IR 模式，不输出调试信息
+    if mode != RunMode::IrPure {
+        println!("正在编译多文件项目: {}", filename);
+    }
+
+    // 创建多文件编译器
+    let mut compiler = MultiFileCompiler::new();
+    
+    // 添加文件所在目录作为搜索路径
+    let file_path = Path::new(filename);
+    if let Some(dir) = file_path.parent() {
+        compiler.add_search_path(dir.to_path_buf());
+    }
+    // 添加当前目录作为搜索路径
+    compiler.add_search_path(PathBuf::from("."));
+
+    // 解析模块名称
+    let module_name = file_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| format!("无法解析模块名称: {}", filename))?;
+
+    // 编译模块
+    let modules = compiler.compile(module_name)
+        .map_err(|e| format!("编译失败: {:?}", e))?;
+
+    if mode != RunMode::IrPure {
+        println!("\n=== 模块依赖 ===");
+        println!("共编译 {} 个模块:", modules.len());
+        for (i, module) in modules.iter().enumerate() {
+            println!("  {}. {}", i + 1, module.path.display());
+        }
+    }
+
+    // 生成合并的 IR
+    let mut combined_ir = String::new();
+    
+    for module in &modules {
+        // 为每个模块生成 IR
+        let ir = xuanyu::generate_ir(&module.module)
+            .map_err(|e| format!("代码生成错误: {}", e.message))?;
+        combined_ir.push_str(&ir);
+        combined_ir.push_str("\n");
+    }
+
+    if mode != RunMode::IrPure {
+        println!("\n=== 代码生成 ===");
+        println!("代码生成完成");
+    }
+
+    // 根据模式执行不同操作
+    match mode {
+        RunMode::IrOnly => {
+            println!("\n--- LLVM IR ---");
+            println!("{}", combined_ir);
+            println!("\n编译成功!");
+        }
+        RunMode::IrPure => {
+            // 只输出纯 IR，没有其他信息
+            println!("{}", combined_ir);
+        }
+        RunMode::Build | RunMode::Run => {
+            // 保存 IR 到临时文件 - 使用唯一名称
+            let temp_ir = format!("xuanyu_ir_{}.ll", std::process::id());
+            fs::write(&temp_ir, &combined_ir)
+                .map_err(|e| format!("无法写入临时 IR 文件: {}", e))?;
+
+            println!("\n--- LLVM IR ---");
+            println!("{}", combined_ir);
+
+            // 生成对象文件
+            println!("\n=== 生成对象文件 ===");
+            let temp_obj = "temp_output.o";
+            
+            // 执行 llc 命令
+            let llc_result = Command::new("llc")
+                .arg(&temp_ir)
+                .arg("-filetype=obj")
+                .arg("-o")
+                .arg(temp_obj)
+                .status();
+
+            match llc_result {
+                Ok(status) => {
+                    if !status.success() {
+                        // 保留 IR 文件用于调试
+                        eprintln!("IR 文件保存在: {}", temp_ir);
+                        return Err(format!("llc 执行失败，退出码: {}", status.code().unwrap_or(-1)));
+                    }
+                }
+                Err(e) => {
+                    // 保留 IR 文件用于调试
+                    eprintln!("IR 文件保存在: {}", temp_ir);
+                    return Err(format!("无法执行 llc: {}\n请确保已安装 LLVM 并配置环境变量。", e));
+                }
+            }
+
+            println!("对象文件生成成功: {}", temp_obj);
+
+            // 查找 runtime.c
+            let exe_dir = env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| env::current_dir().unwrap_or_default());
+            
+            // 尝试多个可能的 runtime 路径
+            let runtime_paths = vec![
+                exe_dir.join("runtime").join("runtime.c"),
+                Path::new("runtime").join("runtime.c"),
+                Path::new("../runtime/runtime.c").to_path_buf(),
+            ];
+
+            let runtime_path = runtime_paths.iter()
+                .find(|p| p.exists())
+                .cloned()
+                .ok_or_else(|| {
+                    let paths = runtime_paths.iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("找不到 runtime.c，请确保文件存在于以下位置之一: {}", paths)
+                })?;
+
+            println!("找到运行时库: {}", runtime_path.display());
+
+            // 生成可执行文件
+            println!("\n=== 链接 ===");
+            let output_exe = if cfg!(target_os = "windows") {
+                "output.exe"
+            } else {
+                "output"
+            };
+
+            // 编译 runtime.c 为目标文件
+            let runtime_obj = "runtime.obj";
+            let compile_runtime_result = Command::new("clang")
+                .arg("-c")
+                .arg(runtime_path)
+                .arg("-o")
+                .arg(runtime_obj)
+                .status();
+
+            match compile_runtime_result {
+                Ok(status) => {
+                    if !status.success() {
+                        cleanup(&temp_ir, temp_obj);
+                        return Err(format!("编译 runtime.c 失败，退出码: {}", status.code().unwrap_or(-1)));
+                    }
+                }
+                Err(e) => {
+                    cleanup(&temp_ir, temp_obj);
+                    return Err(format!("无法执行 clang: {}\n请确保已安装 Clang/LLVM 并配置环境变量.", e));
+                }
+            }
+
+            let linker_result = Command::new("clang")
+                .arg(runtime_obj)
+                .arg(temp_obj)
+                .arg("-o")
+                .arg(output_exe)
+                .arg("-Wl,/SUBSYSTEM:console")
+                .status();
+
+            match linker_result {
+                Ok(status) => {
+                    if !status.success() {
+                        cleanup(&temp_ir, temp_obj);
+                        return Err(format!("链接失败，退出码: {}", status.code().unwrap_or(-1)));
+                    }
+                }
+                Err(e) => {
+                    let _ = fs::remove_file(&temp_ir);
+                    let _ = fs::remove_file(temp_obj);
+                    return Err(format!("无法执行 clang: {}\n请确保已安装 Clang/LLVM 并配置环境变量.", e));
+                }
+            }
+
+            println!("链接成功: {}", output_exe);
+
+            // 清理临时文件
+            cleanup(&temp_ir, temp_obj);
+
+            println!("\n编译成功!");
+
+            // 如果是运行模式，执行程序
+            if mode == RunMode::Run {
+                println!("\n--- 运行结果 ---");
+                
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let exe_path = cwd.join(output_exe);
+                
+                let run_result = Command::new(&exe_path)
+                    .current_dir(&cwd)
+                    .output();
+
+                match run_result {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        
+                        if !stdout.is_empty() {
+                            print!("{}", stdout);
+                        }
+                        if !stderr.is_empty() {
+                            eprint!("{}", stderr);
+                        }
+                        
+                        if !output.status.success() {
+                            return Err(format!("程序退出码: {}", output.status.code().unwrap_or(-1)));
+                        }
+                    }
+                    Err(e) => {
+                        return Err(format!("运行失败: {}", e));
+                    }
+                }
+                println!("----------------");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn cleanup(ir_file: &str, obj_file: &str) {
     let _ = fs::remove_file(ir_file);
     let _ = fs::remove_file(obj_file);
+    let _ = fs::remove_file("runtime.obj");
 }
 
 fn get_source_hash(source: &str) -> u64 {
@@ -409,7 +671,7 @@ fn print_usage(program: &str) {
     println!();
     println!("选项:");
     println!("  -h, --help    显示此帮助信息");
-    println!("  --ir          只生成 LLVM IR (带调试信息，默认)");
+    println!("  --ir          只生成 LLVM IR (带调试信息, 默认)");
     println!("  --ir-pure     只输出纯 LLVM IR (无调试信息)");
     println!("  --build       生成可执行文件");
     println!("  --run         编译并运行程序");
