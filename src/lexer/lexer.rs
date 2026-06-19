@@ -693,10 +693,9 @@ impl Lexer {
             }
         };
 
-        // 语义空格校验: 检查中文关键字后是否有空格 (仅警告)
-        if is_keyword(&token.literal) {
-            self.check_semantic_whitespace(&token);
-        }
+        // 语义空格校验: 检查前一个token是关键字时，与当前token之间是否有空格 (仅警告)
+        // 修复：不应仅限当前token是keyword的情况，应该检查prev_token是否为keyword
+        self.check_semantic_whitespace(&token);
 
         // 保存上一个 Token 及其结束位置
         self.prev_token = Some(token.clone());

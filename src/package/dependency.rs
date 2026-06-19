@@ -352,7 +352,7 @@ impl DependencyResolver {
                 println!("[下载] {} {} 从官方仓库", dep.name, dep.version_req);
                 Ok(target_dir)
             }
-            DependencySource::Git { url, rev } => {
+            DependencySource::Git { url, rev: _ } => {
                 println!("[下载] {} 从 Git: {}", dep.name, url);
                 // TODO: git clone
                 Ok(target_dir)

@@ -429,7 +429,7 @@ impl Repl {
     /// 包装代码为完整程序
     fn wrap_code(&self, code: &str) -> String {
         // 构建已定义函数的声明
-        let func_decls: String = self.context.functions.iter()
+        let _func_decls: String = self.context.functions.iter()
             .map(|f| {
                 let params: String = f.params.iter()
                     .map(|p| format!("{}: {:?}", p.name, p.param_type))

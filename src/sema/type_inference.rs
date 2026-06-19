@@ -12,8 +12,7 @@
  */
 
 use std::collections::HashMap;
-use crate::ast::{Type, Expr, Stmt, BinaryOp, LiteralKind, Function, FunctionParam};
-use crate::lexer::token::Span;
+use crate::ast::{Type, Expr, Stmt, BinaryOp, LiteralKind, Function};
 
 /**
  * 类型推断引擎

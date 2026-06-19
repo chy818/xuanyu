@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 use std::time::SystemTime;
 
-use xuanyu::compiler::{MultiFileCompiler, ModuleInfo};
+use xuanyu::compiler::MultiFileCompiler;
 
 #[cfg(target_os = "windows")]
 fn setup_windows_console() {

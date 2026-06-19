@@ -493,7 +493,7 @@ impl SemanticAnalyzer {
                 span: Span::dummy(),
             }])?;
         let source = String::from_utf8(source)
-            .map_err(|e| vec![TypeError {
+            .map_err(|_e| vec![TypeError {
                 code: "E0428".to_string(),
                 message: format!("模块不是有效的 UTF-8 编码: {}", resolved_path),
                 span: Span::dummy(),
@@ -922,7 +922,7 @@ impl SemanticAnalyzer {
         };
 
         // 检查类型标注与初始化值类型是否兼容
-        if let Some(init) = &let_stmt.initializer {
+        if let Some(_init) = &let_stmt.initializer {
             if let Some(type_annotation) = &let_stmt.type_annotation {
                 if let Some(ref init_type) = inferred_type {
                     if !init_type.can_cast_to(type_annotation) {

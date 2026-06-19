@@ -392,7 +392,7 @@ impl FunctionInliner {
     fn extract_function_name(&self, line: &str) -> Option<String> {
         // 格式: define return_type @func_name(params) {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        for (i, part) in parts.iter().enumerate() {
+        for (_i, part) in parts.iter().enumerate() {
             if part.starts_with('@') {
                 let name = part.trim_start_matches('@').trim_end_matches('(');
                 return Some(name.to_string());
@@ -404,7 +404,7 @@ impl FunctionInliner {
     /**
      * 提取参数列表
      */
-    fn extract_params(&self, line: &str) -> Vec<String> {
+    fn extract_params(&self, _line: &str) -> Vec<String> {
         // 简化实现：返回空列表
         Vec::new()
     }

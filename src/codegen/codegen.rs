@@ -492,7 +492,7 @@ impl CodeGenerator {
         }
         
         // 记录生成函数体前的 IR 长度
-        let ir_len_before_body = self.ir.len();
+        let _ir_len_before_body = self.ir.len();
         
         // 生成函数体
         self.generate_block(&func.body)?;
@@ -1802,7 +1802,6 @@ impl CodeGenerator {
             // 返回 i8* 的函数
             "rt_list_new" => Some("i8*".to_string()),
             "rt_list_get" => Some("i8*".to_string()),
-            "rt_list_new" => Some("i8*".to_string()),
             "rt_str_new" => Some("i8*".to_string()),
             "rt_str_concat" => Some("i8*".to_string()),
             "rt_string_concat" => Some("i8*".to_string()),
@@ -2377,11 +2376,7 @@ impl CodeGenerator {
                 "codegenRunMain" => "codegenRunMain".to_string(),
                 "codegen获取IR" => "codegen_get_ir".to_string(),
                 "codegen遍历AST" => "codegen_traverse_ast".to_string(),
-                // V2 运行时函数映射 - 仅在调用时使用C运行时函数名
-                // 定义时使用 v2_ 前缀避免冲突（通过translate_def_name区分）
-                "列表长度" => "rt_list_len".to_string(),
-                "列表获取" => "rt_list_get".to_string(),
-                "列表追加" => "rt_list_append".to_string(),
+                // V2 运行时函数映射
                 "列表添加" => "rt_list_append".to_string(),
                 "列表设置" => "rt_list_set".to_string(),
                 // V2 参数读取函数
@@ -2394,14 +2389,10 @@ impl CodeGenerator {
                 "执行命令" => "exec_cmd".to_string(),
                 // V2 文本操作
                 "文本切片" => "rt_string_substring".to_string(),
-                "文本长度" => "rt_string_len".to_string(),
-                "列表" => "rt_list_new".to_string(),
-                "文本拼接" => "rt_str_concat".to_string(),
                 "文本获取字符" => "rt_string_char_at".to_string(),
                 "文本包含" => "str_contains".to_string(),
                 "文本转整数" => "rt_str_to_int".to_string(),
                 "整数转文本" => "rt_int_to_str".to_string(),
-                "文本拼接" => "rt_str_concat".to_string(),
                 "详细输出" => "rt_print".to_string(),
                 "字符编码" => "rt_char_to_code".to_string(),
                 _ => {

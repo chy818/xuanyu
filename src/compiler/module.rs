@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use crate::ast::Module;
 use crate::error::CompilerError;
 use crate::LexerError;
-use crate::ParserError;
 use crate::lexer::Lexer;
 use crate::parser::parse;
 

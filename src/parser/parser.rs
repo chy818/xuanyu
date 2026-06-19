@@ -200,18 +200,14 @@ impl Parser {
                     Err(e) => return Err(e),
                 }
             } else if self.check(&TokenType::Keyword(Keyword::定义)) {
-                let is_mutable = self.peek_keyword(&Keyword::可变);
-                if is_mutable {
-                    match self.parse_let_statement() {
-                        Ok(stmt) => {
-                            if let Stmt::Let(let_stmt) = stmt {
-                                variables.push(let_stmt);
-                            }
+                // parse_let_statement 内部会正确处理 可变/非可变 两种情况
+                match self.parse_let_statement() {
+                    Ok(stmt) => {
+                        if let Stmt::Let(let_stmt) = stmt {
+                            variables.push(let_stmt);
                         }
-                        Err(e) => return Err(e),
                     }
-                } else {
-                    self.advance();
+                    Err(e) => return Err(e),
                 }
             } else if self.check(&TokenType::Keyword(Keyword::外部)) {
                 match self.parse_extern_function() {
@@ -1083,7 +1079,7 @@ impl Parser {
     /**
      * 解析语句
      */
-    fn parse_statement(&mut self) -> Result<Stmt, ParserError> {
+    pub fn parse_statement(&mut self) -> Result<Stmt, ParserError> {
         let token = self.current()
             .ok_or_else(|| ParserError::unexpected_token_at(1, 1, "期望语句"))?;
 
@@ -1790,7 +1786,7 @@ impl Parser {
      * 解析表达式
      * 使用运算符优先级解析
      */
-    fn parse_expression(&mut self) -> Result<Expr, ParserError> {
+    pub fn parse_expression(&mut self) -> Result<Expr, ParserError> {
         self.parse_assignment_expression()
     }
 
