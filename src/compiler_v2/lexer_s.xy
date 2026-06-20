@@ -333,7 +333,7 @@
 /**
  * 读取注释
  */
-函数 lexer读取注释(lex: Lexer): Token {
+函数 lexer读取注释(lex: Lexer): Lexer {
     定义 可变 tok: Token
     定义 可变 开始: 整数
     开始 = lex.开始位置
@@ -378,13 +378,14 @@
     提取的值 = 提取子串(lex.源码, 开始, lex.位置)
     tok.值 = 提取的值
 
-    返回 tok
+    lex.当前token = tok
+    返回 lex
 }
 
 /**
  * 读取字符字面量
  */
-函数 lexer读取字符(lex: Lexer): Token {
+函数 lexer读取字符(lex: Lexer): Lexer {
     定义 可变 tok: Token
     定义 可变 开始: 整数
     开始 = lex.开始位置
@@ -435,13 +436,14 @@
     提取的值 = 提取子串(lex.源码, 开始, lex.位置)
     tok.值 = 提取的值
 
-    返回 tok
+    lex.当前token = tok
+    返回 lex
 }
 
 /**
  * 读取复合运算符（==, !=, <=, >=, &&, ||）
  */
-函数 lexer读取复合运算符(lex: Lexer): Token {
+函数 lexer读取复合运算符(lex: Lexer): Lexer {
     定义 可变 tok: Token
     定义 可变 开始: 整数
     开始 = lex.开始位置
@@ -503,13 +505,14 @@
     tok.结束位置 = lex.位置
     tok.值 = op
 
-    返回 tok
+    lex.当前token = tok
+    返回 lex
 }
 
 /**
  * 读取标识符或关键字
  */
-函数 lexer读取标识符(lex: Lexer): Token {
+函数 lexer读取标识符(lex: Lexer): Lexer {
     定义 可变 tok: Token
     定义 可变 开始: 整数
     开始 = lex.开始位置
@@ -536,13 +539,14 @@
         tok.类型 = 3  // 关键字
     }
 
-    返回 tok
+    lex.当前token = tok
+    返回 lex
 }
 
 /**
  * 读取数字
  */
-函数 lexer读取数字(lex: Lexer): Token {
+函数 lexer读取数字(lex: Lexer): Lexer {
     定义 可变 tok: Token
     定义 可变 开始: 整数
     开始 = lex.开始位置
@@ -564,13 +568,14 @@
     提取的值 = 提取子串(lex.源码, 开始, lex.位置)
     tok.值 = 提取的值
 
-    返回 tok
+    lex.当前token = tok
+    返回 lex
 }
 
 /**
  * 读取字符串
  */
-函数 lexer读取字符串(lex: Lexer): Token {
+函数 lexer读取字符串(lex: Lexer): Lexer {
     定义 可变 tok: Token
     定义 可变 开始: 整数
     开始 = lex.开始位置
@@ -599,13 +604,14 @@
     提取的值 = 提取子串(lex.源码, 开始, lex.位置)
     tok.值 = 提取的值
 
-    返回 tok
+    lex.当前token = tok
+    返回 lex
 }
 
 /**
  * 读取运算符
  */
-函数 lexer读取运算符(lex: Lexer): Token {
+函数 lexer读取运算符(lex: Lexer): Lexer {
     定义 可变 tok: Token
     定义 可变 开始: 整数
     开始 = lex.开始位置
@@ -626,13 +632,14 @@
     提取的值 = 提取子串(lex.源码, 开始, lex.位置)
     tok.值 = 提取的值
 
-    返回 tok
+    lex.当前token = tok
+    返回 lex
 }
 
 /**
  * 读取符号
  */
-函数 lexer读取符号(lex: Lexer): Token {
+函数 lexer读取符号(lex: Lexer): Lexer {
     定义 可变 tok: Token
     定义 可变 开始: 整数
     开始 = lex.开始位置
@@ -649,13 +656,15 @@
 
     lex = lexer前进(lex)
 
-    返回 tok
+    lex.当前token = tok
+    返回 lex
 }
 
 /**
  * 读取下一个 Token
+ * 返回更新后的 Lexer（token存储在 lex.当前token 中）
  */
-函数 lexerNextToken(lex: Lexer): Token {
+函数 lexerNextToken(lex: Lexer): Lexer {
     定义 可变 tok: Token
     tok.类型 = 6
     tok.值 = ""
@@ -677,19 +686,21 @@
     若 ch == 0 则 {
         tok.类型 = 6
         tok.值 = "EOF"
-        返回 tok
+        lex.当前token = tok
+        返回 lex
     }
 
     // 字符串
     若 ch == 34 则 {
-        tok = lexer读取字符串(lex)
-        返回 tok
+        lex = lexer读取字符串(lex)
+        lex.当前token = lex.当前token
+        返回 lex
     }
 
     // 字符字面量
     若 ch == 39 则 {
-        tok = lexer读取字符(lex)
-        返回 tok
+        lex = lexer读取字符(lex)
+        返回 lex
     }
 
     // 注释
@@ -697,47 +708,48 @@
         定义 可变 nextCh: 整数
         nextCh = lex.源码[lex.位置 + 1]
         若 nextCh == 47 || nextCh == 42 则 {
-            tok = lexer读取注释(lex)
-            返回 tok
+            lex = lexer读取注释(lex)
+            返回 lex
         }
     }
 
     // 复合运算符 (==, !=, <=, >=, &&, ||)
     若 是比较起始(ch) == 1 则 {
-        tok = lexer读取复合运算符(lex)
-        返回 tok
+        lex = lexer读取复合运算符(lex)
+        返回 lex
     }
 
     // 字母开头 -> 标识符或关键字
     若 是字母(ch) == 1 则 {
-        tok = lexer读取标识符(lex)
-        返回 tok
+        lex = lexer读取标识符(lex)
+        返回 lex
     }
 
     // 数字开头 -> 数字
     若 是数字(ch) == 1 则 {
-        tok = lexer读取数字(lex)
-        返回 tok
+        lex = lexer读取数字(lex)
+        返回 lex
     }
 
     // 单字符运算符 (+, -, *, /, %, etc.)
     若 是运算符(ch) == 1 则 {
-        tok = lexer读取运算符(lex)
-        返回 tok
+        lex = lexer读取运算符(lex)
+        返回 lex
     }
 
     // 符号
     若 是符号(ch) == 1 则 {
-        tok = lexer读取符号(lex)
-        返回 tok
+        lex = lexer读取符号(lex)
+        返回 lex
     }
 
     // 未知字符
     lex = lexer前进(lex)
-    tok.类型 = 12  // 错误
+    tok.类型 = 12
     tok.值 = "UNKNOWN"
     tok.结束位置 = lex.位置
-    返回 tok
+    lex.当前token = tok
+    返回 lex
 }
 
 /* ============ 错误恢复和优化 ============ */
@@ -1193,7 +1205,8 @@
     tok.结束位置 = 0
 
     当 tok.类型 != 6 && count < 1000 则 {
-        tok = lexerNextToken(lex)
+        lex = lexerNextToken(lex)
+        tok = lex.当前token
 
         // 跳过注释
         若 tok.类型 == 7 则 {
@@ -1243,7 +1256,8 @@
     tok.结束位置 = 0
 
     当 tok.类型 != 6 则 {
-        tok = lexerNextToken(lex)
+        lex = lexerNextToken(lex)
+        tok = lex.当前token
         列表追加(tokens, tok)
     }
 

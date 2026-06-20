@@ -369,14 +369,48 @@ impl CodeGenerator {
             let (llvm_type, field_size) = match &field.field_type {
                 Type::Int | Type::Long | Type::Bool | Type::Char => ("i64", 8),
                 Type::Float | Type::Double => ("double", 8),
-                Type::String | Type::Pointer | Type::List(_) | Type::Array(_) | Type::Optional(_) => ("i8*", 8),
-                Type::Custom(_) | Type::Struct(_) | Type::Any | Type::Function(_, _) | Type::Future(_) => ("i8*", 8),
-                _ => ("i64", 8),
+                Type::String | Type::Pointer | Type::Any => ("i8*", 8),
+                Type::List(_) | Type::Array(_) | Type::Optional(_) | Type::Future(_) => ("i8*", 8),
+                Type::Function(_, _) => ("i8*", 8),
+                Type::Struct(s_name) | Type::Custom(s_name) => {
+                    let size = self.compute_struct_size(s_name);
+                    ("i64", size)
+                },
+                Type::Void | Type::Unknown | Type::TypeVar(_) => ("i64", 8),
             };
             fields.push((field.name.clone(), offset, llvm_type.to_string()));
             offset += field_size;
         }
         self.struct_field_layouts.insert(struct_name, fields);
+    }
+
+    /// 计算结构体的总大小（字节数），用于正确计算嵌套结构体偏移
+    fn compute_struct_size(&self, struct_name: &str) -> i32 {
+        if let Some(fields) = self.struct_field_layouts.get(struct_name) {
+            if let Some((_, last_offset, _)) = fields.last() {
+                return last_offset + 8;
+            }
+        }
+        // 未注册的结构体：根据名称猜测大小
+        // Token 有6个字段 = 48字节, AST节点有7个字段 = 56字节, Lexer ~112字节
+        match struct_name {
+            "Token" => 48,       // 6 fields × 8 bytes
+            "AST节点" | "ASTNode" => 56,  // 7 fields × 8 bytes
+            "Lexer" => 120,      // 10 fields: 9×8 + 48(Token) = 120
+            "Parser" => 80,      // 9 fields × 8 + extra
+            "Sema" => 120,       // ~13 fields × 8 + inline structs
+            "Codegen" => 160,    // ~20 fields × 8
+            "符号" => 48,        // 6 fields
+            "作用域" => 32,      // 4 fields
+            "循环状态" => 16,    // 2 fields
+            "循环上下文" => 32,  // 4 fields
+            "ErrorRecovery" => 24, // 3 fields
+            _ => {
+                // 对于未知结构体，保守估计80字节
+                eprintln!("[codegen] 未知结构体大小: {}, 默认80字节", struct_name);
+                80
+            }
+        }
     }
 
     /**
@@ -644,40 +678,45 @@ impl CodeGenerator {
      */
     fn generate_let_stmt(&mut self, let_stmt: &LetStmt) -> Result<(), CodegenError> {
         let var_name = self.translate_func_name(&let_stmt.name);
-        
-        // 确定变量类型
+
+        let struct_name = if let Some(type_annotation) = &let_stmt.type_annotation {
+            match type_annotation {
+                Type::Custom(n) | Type::Struct(n) => Some(n.clone()),
+                _ => None,
+            }
+        } else { None };
+
         let var_type = if let Some(initializer) = &let_stmt.initializer {
-            // 有初始值，从初始值推断类型
             self.infer_expression_type(initializer)
         } else if let Some(type_annotation) = &let_stmt.type_annotation {
-            // 有类型注解，从类型注解推断类型
             self.type_to_llvm_type(type_annotation)
-        } else {
-            // 都没有，默认使用 i64 类型
-            "i64".to_string()
-        };
-        
-        // 生成 alloca 指令
+        } else { "i64".to_string() };
+
         let alloca = self.new_label(&var_name);
-        self.emit(&format!("    %{} = alloca {}, align 8", alloca, var_type));
-        
-        // 如果有初始值，生成 store 指令
-        if let Some(initializer) = &let_stmt.initializer {
-            let expr_val = self.generate_expression(initializer)?;
-            // 可能需要类型转换
-            let expr_type = self.infer_expression_type(initializer);
-            let final_val = if expr_type != var_type {
-                self.generate_type_conversion(&expr_val, &expr_type, &var_type)
-            } else {
-                expr_val
-            };
-            self.emit(&format!("    store {} %{}, {}* %{}", var_type, final_val, var_type, alloca));
+        if let Some(s_name) = struct_name {
+            let struct_size = self.compute_struct_size(&s_name);
+            // 堆分配结构体，避免栈上分配导致的悬垂指针问题
+            let heap_ptr = self.new_label(&format!("{}_heap", var_name));
+            self.emit(&format!("    %{} = call i8* @rt_malloc(i64 {})", heap_ptr, struct_size));
+            // 存储堆指针到 alloca 槽中（兼容现有变量查找逻辑）
+            let ptr_store = self.new_label(&format!("{}_ref", var_name));
+            self.emit(&format!("    %{} = alloca i8*, align 8", ptr_store));
+            self.emit(&format!("    store i8* %{}, i8** %{}", heap_ptr, ptr_store));
+            self.variables.insert(var_name.clone(), ptr_store);
+            self.variable_types.insert(var_name, "i8*".to_string());
+        } else {
+            self.emit(&format!("    %{} = alloca {}, align 8", alloca, var_type));
+            if let Some(initializer) = &let_stmt.initializer {
+                let expr_val = self.generate_expression(initializer)?;
+                let expr_type = self.infer_expression_type(initializer);
+                let final_val = if expr_type != var_type {
+                    self.generate_type_conversion(&expr_val, &expr_type, &var_type)
+                } else { expr_val };
+                self.emit(&format!("    store {} %{}, {}* %{}", var_type, final_val, var_type, alloca));
+            }
+            self.variables.insert(var_name.clone(), alloca);
+            self.variable_types.insert(var_name, var_type);
         }
-        
-        // 记录变量
-        self.variables.insert(var_name.clone(), alloca);
-        self.variable_types.insert(var_name, var_type);
-        
         Ok(())
     }
 
@@ -2339,6 +2378,7 @@ impl CodeGenerator {
                 "新建列表" => "rt_list_new".to_string(),
                 "列表追加" => "rt_list_append".to_string(),
                 "列表获取" => "rt_list_get".to_string(),
+                "列表长度" => "rt_list_len".to_string(),
                 "文本长度" => "rt_string_len".to_string(),
                 "列表" => "rt_list_new".to_string(),
                 // ========== 运行时函数映射（保持原名，不哈希）==========
