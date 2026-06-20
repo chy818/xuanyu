@@ -1,0 +1,15 @@
+/**
+ * @file test_closure.xy
+ * @brief Closure test - closure captures external variable
+ */
+
+函数 主(): 整数 {
+    定义 x = 10
+
+    定义 加法 = 函数(y) => x + y
+
+    打印整数(加法(5))
+    打印("\n")
+
+    返回 0
+}

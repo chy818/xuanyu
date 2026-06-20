@@ -1,0 +1,17 @@
+/**
+ * @file test_tailcall.xy
+ * @brief Tail call test - recursive function
+ */
+
+函数 factorial(n, acc): 整数 {
+    若 n == 0 则 {
+        返回 acc
+    }
+    返回 factorial(n - 1, n * acc)
+}
+
+函数 主(): 整数 {
+    打印整数(factorial(5, 1))
+    打印("\n")
+    返回 0
+}

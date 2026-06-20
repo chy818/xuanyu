@@ -1,0 +1,4 @@
+// 简单测试程序
+打印("Hello, Xuan Yu Compiler!")
+打印("This is a simple test program.")
+打印("Test completed successfully!")

@@ -1,0 +1,12 @@
+/**
+ * @file tests/bootstrap/self_compile_test.xy
+ * @brief 自展编译测试
+ */
+函数 主() : 整数 {
+    打印("=== 自展测试 ===")
+    定义 x: 整数 = 42
+    若 x > 10 则 {
+        打印整数(x)
+    }
+    返回 0
+}

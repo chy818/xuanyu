@@ -6,7 +6,6 @@ target/
 *.dylib
 
 # Cargo 锁定文件
-# 如果需要 lock 文件，可以注释掉这一行
 # Cargo.lock
 
 # IDE
@@ -41,34 +40,22 @@ release/
 *.asm
 *.s
 
-# 测试生成的临时文件
-test_*.xy
+# 构建输出目录
+out/
+dist/
+output/
 
-# Trae IDE
+# Trae IDE 配置
 .trae/
-MCP.json
 
 # xy 编译器输出
 *.ir
-out/
-dist/
-
-# 构建脚本（仅保留 build_*.ps1 在 scripts 目录）
-scripts/*.ps1
-scripts/*.py
-
-# Python 构建脚本
-*.py
-build_*.py
-
-# Windows 批处理脚本
-*.bat
 
 # 缓存文件
 *.xy.cache
 
-# 根目录下的测试文件
-test*.xy
-*_test.xy
-*_simple.xy
+# 根目录下的测试残留文件
 xuanyu_ir_*.ll
+
+# 意外重定向文件
+$null

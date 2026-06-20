@@ -1,0 +1,18 @@
+/**
+ * @file test_enum_multiline.xy
+ * @brief 测试多行枚举定义
+ */
+
+枚举 TokenType {
+    Id,
+    Kw,
+    Num,
+    Str,
+    Sym,
+    End,
+}
+
+函数 主(): 整数 {
+    打印("多行枚举测试")
+    返回 0
+}

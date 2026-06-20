@@ -1,0 +1,72 @@
+/**
+ * @file test_string.xy
+ * @brief 测试字符串处理函数
+ */
+
+函数 测试文本拼接(): 整数 {
+    定义 s1: 文本 = "Hello"
+    定义 s2: 文本 = "World"
+    定义 result: 文本 = 文本拼接(s1, s2)
+
+    若 文本包含(result, "HelloWorld") 则 {
+        返回 1
+    }
+    返回 0
+}
+
+函数 测试文本长度(): 整数 {
+    定义 s: 文本 = "Hello"
+    定义 len: 整数 = 文本长度(s)
+
+    若 len == 5 则 {
+        返回 1
+    }
+    返回 0
+}
+
+函数 测试文本切片(): 整数 {
+    定义 s: 文本 = "HelloWorld"
+    定义 sub: 文本 = 文本切片(s, 0, 5)
+
+    若 sub == "Hello" 则 {
+        返回 1
+    }
+    返回 0
+}
+
+函数 测试文本替换(): 整数 {
+    定义 s: 文本 = "Hello World"
+    定义 result: 文本 = 文本替换(s, "World", "XY")
+
+    若 result == "Hello XY" 则 {
+        返回 1
+    }
+    返回 0
+}
+
+函数 测试文本转大小写(): 整数 {
+    定义 s: 文本 = "hello"
+    定义 upper: 文本 = 文本转大写(s)
+    定义 lower: 文本 = 文本转小写("WORLD")
+
+    若 upper == "HELLO" && lower == "world" 则 {
+        返回 1
+    }
+    返回 0
+}
+
+函数 主(): 整数 {
+    定义 total: 整数 = 0
+
+    total = total + 测试文本拼接()
+    total = total + 测试文本长度()
+    total = total + 测试文本切片()
+    total = total + 测试文本替换()
+    total = total + 测试文本转大小写()
+
+    打印("字符串测试完成: ")
+    打印整数(total)
+    打印("/5\n")
+
+    返回 0
+}

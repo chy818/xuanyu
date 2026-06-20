@@ -1,0 +1,13 @@
+/**
+ * 测试函数参数类型标注 - 文本类型
+ */
+
+函数 isKeyword(text: 文本): 整数 {
+    打印(text)
+    返回 0
+}
+
+函数 主(): 整数 {
+    定义 result = isKeyword("函数")
+    返回 result
+}

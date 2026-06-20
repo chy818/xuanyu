@@ -1,0 +1,9 @@
+// Simple Input Test
+函数 主(): 整数 {
+    打印("Enter a number: ");
+    定义 x: 整数 = 输入整数();
+    打印("You entered: ");
+    打印整数(x);
+    打印("\n");
+    返回 0;
+}

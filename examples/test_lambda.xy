@@ -1,0 +1,11 @@
+/**
+ * @file test_lambda.xy
+ * @brief Lambda test - basic lambda expression
+ */
+
+函数 主(): 整数 {
+    定义 f = 函数(x) => x + 1
+    打印整数(f(5))
+    打印("\n")
+    返回 0
+}

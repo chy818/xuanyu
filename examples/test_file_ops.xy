@@ -1,0 +1,26 @@
+/**
+ * @file test_file_ops.xy
+ * @brief 测试文件操作
+ */
+
+函数 测试文件存在(): 整数 {
+    定义 result: 整数 = 文件存在("test_file_ops.xy")
+
+    若 result == 1 则 {
+        返回 1
+    }
+
+    返回 0
+}
+
+函数 main(): 整数 {
+    定义 total: 整数 = 0
+
+    total = total + 测试文件存在()
+
+    打印("文件操作测试完成: ")
+    打印整数(total)
+    打印("/1\n")
+
+    返回 0
+}

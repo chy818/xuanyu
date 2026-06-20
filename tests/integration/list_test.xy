@@ -1,0 +1,11 @@
+/**
+ * @file tests/integration/list_test.xy
+ * @brief 列表集成测试
+ */
+函数 主() : 整数 {
+    打印("=== 列表测试 ===")
+    定义 我的列表: 列表 = rt_list_new()
+    rt_list_append(我的列表, "测试")
+    打印整数(rt_list_len(我的列表))
+    返回 0
+}

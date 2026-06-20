@@ -1,0 +1,19 @@
+/**
+ * @file test_slice.xy
+ * @brief 测试文本切片功能
+ */
+
+函数 主(): 整数 {
+    定义 text: 文本
+    text = "Hello World"
+    
+    定义 slice: 文本
+    slice = 文本切片(text, 0, 5)
+    
+    打印("原始文本: ")
+    打印(text)
+    打印("切片结果: ")
+    打印(slice)
+    
+    返回 0
+}
