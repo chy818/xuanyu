@@ -196,7 +196,7 @@
     tempCount: 整数,
     labelCount: 整数,
     funcCount: 整数,
-    output: 列表,
+    output: 文本,
     indent: 整数,
     stringConstCount: 整数,
     funcDefs: 列表,

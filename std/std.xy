@@ -1,10 +1,10 @@
 /**
- * @file stdlib/std.xy
+ * @file std/std.xy
  * @brief 玄语标准库入口
  * @description 导入所有标准库模块
  *
  * 使用方法:
- * 引入 "stdlib/std.xy"
+ * 引入 "std/std.xy"
  */
 
 // 导入字符串处理模块

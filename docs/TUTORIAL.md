@@ -326,7 +326,7 @@ xy hello.xy --run
 
 ```xy
 // 导入标准库
-导入 "stdlib/std.xy"
+导入 "std/std.xy"
 
 // 导入自定义模块
 导入 "./utils.xy"

@@ -1386,16 +1386,6 @@
 /**
  * 同步到函数开始
  */
-函数 parser同步到函数(p: Parser): 无返回 {
-    定义 可变 tok: Token
-    tok = parserPeekToken(p)
-
-    当 tok.值 != "函数" && tok.类型 != 6 && tok.值 != "" 则 {
-        parserConsume(p)
-        tok = parserPeekToken(p)
-    }
-}
-
 /**
  * 检查下一个 token 是否为指定值
  */
@@ -1737,7 +1727,7 @@
     定义 可变 depth: 整数
     depth = 0
 
-    当 p.当前位置 < p.源码长度 则 {
+    当 p.pos < p.tokenCount 则 {
         定义 可变 tok: Token
         tok = parserPeekToken(p)
 
@@ -2035,32 +2025,32 @@
 
     /* 循环解析直到文件结束 */
     当 tok.类型 != 6 && tok.值 != "" 则 {
-        若 tok.值 == "函数" 则 {
+        若 tok.值 == "函数" || tok.值 == "function" 则 {
             定义 可变 funcNode: AST节点
             funcNode = parseFunction(p)
             progNode.children.追加(funcNode)
         } 否则 {
-            若 tok.值 == "结构体" 则 {
+            若 tok.值 == "结构体" || tok.值 == "struct" 则 {
                 定义 可变 structNode: AST节点
                 structNode = parseStructDefinition(p)
                 progNode.children.追加(structNode)
             } 否则 {
-                若 tok.值 == "枚举" 则 {
+                若 tok.值 == "枚举" || tok.值 == "enum" 则 {
                     定义 可变 enumNode: AST节点
                     enumNode = parseEnumDefinition(p)
                     progNode.children.追加(enumNode)
                 } 否则 {
-                    若 tok.值 == "引入" 则 {
+                    若 tok.值 == "引入" || tok.值 == "import" 则 {
                         定义 可变 importNode: AST节点
                         importNode = parseImportStatement(p)
                         progNode.children.追加(importNode)
                     } 否则 {
-                        若 tok.值 == "模块" 则 {
+                        若 tok.值 == "模块" || tok.值 == "module" 则 {
                             定义 可变 moduleNode: AST节点
                             moduleNode = parseModuleDefinition(p)
                             progNode.children.追加(moduleNode)
                         } 否则 {
-                            若 tok.值 == "外部" 则 {
+                            若 tok.值 == "外部" || tok.值 == "extern" 则 {
                                 定义 可变 externalNode: AST节点
                                 externalNode = parseExternalDeclaration(p)
                                 progNode.children.追加(externalNode)

@@ -112,6 +112,7 @@ void print_bool(int val) {
 /* rt_ prefix aliases for LLVM IR compatibility */
 void rt_print(void* str) {
     print(str);
+    fflush(stdout);
 }
 
 void rt_println(void* str) {
@@ -251,6 +252,29 @@ void* list_get(void* list_ptr, int64_t index) {
 int64_t rt_string_len(void* str) {
     if (!str) return 0;
     return strlen((char*)str);
+}
+
+/* UTF-8 helper functions */
+int64_t rt_utf8_byte_length(int64_t ch) {
+    unsigned char c = (unsigned char)ch;
+    if ((c & 0x80) == 0) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+int64_t rt_is_utf8_leader(int64_t ch) {
+    unsigned char c = (unsigned char)ch;
+    return ((c & 0x80) == 0) || 
+           ((c & 0xE0) == 0xC0) || 
+           ((c & 0xF0) == 0xE0) || 
+           ((c & 0xF8) == 0xF0);
+}
+
+int64_t rt_is_utf8_continuation(int64_t ch) {
+    unsigned char c = (unsigned char)ch;
+    return (c & 0xC0) == 0x80;
 }
 
 void* rt_string_char_at(void* str, int64_t index) {

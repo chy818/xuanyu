@@ -151,12 +151,12 @@ impl Lexer {
     }
 
     /**
-     * 跳过空白字符 (空格、制表符)
+     * 跳过空白字符 (空格、制表符、BOM)
      * 注意: 不跳过换行符，因为换行符有语法意义
      */
     fn skip_whitespace(&mut self) {
         while let Some(ch) = self.current_char() {
-            if ch == ' ' || ch == '\t' || ch == '\r' {
+            if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\u{feff}' {
                 self.advance();
             } else {
                 break;

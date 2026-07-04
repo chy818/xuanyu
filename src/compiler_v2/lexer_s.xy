@@ -25,7 +25,7 @@
 函数 是字母(ch: 整数): 整数 {
     若 ch >= 65 && ch <= 90 则 { 返回 1 }
     若 ch >= 97 && ch <= 122 则 { 返回 1 }
-    若 ch >= 0xE4 则 { 返回 1 }
+    若 ch >= 192 && ch <= 255 则 { 返回 1 }
     若 ch == 95 则 { 返回 1 }
     返回 0
 }
@@ -134,6 +134,32 @@
     若 text == "引入" 则 { 返回 1 }
     若 text == "模块" 则 { 返回 1 }
     若 text == "导出" 则 { 返回 1 }
+    /* ========== 控制流 (英文) ========== */
+    若 text == "if" 则 { 返回 1 }
+    若 text == "else" 则 { 返回 1 }
+    若 text == "while" 则 { 返回 1 }
+    若 text == "for" 则 { 返回 1 }
+    若 text == "return" 则 { 返回 1 }
+    若 text == "function" 则 { 返回 1 }
+    若 text == "struct" 则 { 返回 1 }
+    若 text == "enum" 则 { 返回 1 }
+    若 text == "true" 则 { 返回 1 }
+    若 text == "false" 则 { 返回 1 }
+    若 text == "break" 则 { 返回 1 }
+    若 text == "continue" 则 { 返回 1 }
+    /* ========== 类型 (英文) ========== */
+    若 text == "int" 则 { 返回 1 }
+    若 text == "float" 则 { 返回 1 }
+    若 text == "double" 则 { 返回 1 }
+    若 text == "bool" 则 { 返回 1 }
+    若 text == "string" 则 { 返回 1 }
+    若 text == "void" 则 { 返回 1 }
+    若 text == "char" 则 { 返回 1 }
+    若 text == "list" 则 { 返回 1 }
+    /* ========== 模块 (英文) ========== */
+    若 text == "import" 则 { 返回 1 }
+    若 text == "module" 则 { 返回 1 }
+    若 text == "export" 则 { 返回 1 }
     若 text == "尝试" 则 { 返回 1 }
     若 text == "捕获" 则 { 返回 1 }
     若 text == "最终" 则 { 返回 1 }
@@ -290,19 +316,28 @@
     lex.源码 = 源码
     lex.位置 = 0
     lex.长度 = 文本长度(源码)
+    打印("DEBUG lexerInit: 长度=")
+    打印整数(lex.长度)
+    打印("\n")
     lex.行号 = 1
     lex.列号 = 1
     lex.开始位置 = 0
     lex.当前字符 = 获取字符(lex)
+    打印("DEBUG lexerInit: 当前字符=")
+    打印整数(lex.当前字符)
+    打印("\n")
     lex.token列表 = 列表()
     返回 lex
 }
 
 /**
- * 前进到下一个字符
+ * 前进到下一个字符（支持UTF-8多字节字符）
  */
 函数 lexer前进(lex: Lexer): Lexer {
-    lex.位置 = lex.位置 + 1
+    定义 可变 步长: 整数
+    步长 = utf8字节长度(lex.当前字符)
+
+    lex.位置 = lex.位置 + 步长
     lex.列号 = lex.列号 + 1
 
     若 lex.位置 < lex.长度 则 {
@@ -323,7 +358,7 @@
  * 跳过空白字符
  */
 函数 lexer跳过空白(lex: Lexer): Lexer {
-    当 是空白(lex.当前字符) == 1 则 {
+    当 是空白(lex.当前字符) == 1 && lex.位置 < lex.长度 则 {
         lex = lexer前进(lex)
     }
     lex.开始位置 = lex.位置
@@ -347,7 +382,10 @@
     // 检查是 // 还是 /*
     若 lex.当前字符 == 47 则 {  // /
         定义 可变 nextCh: 整数
-        nextCh = lex.源码[lex.位置 + 1]
+        nextCh = 0
+        若 lex.位置 + 1 < lex.长度 则 {
+            nextCh = lex.源码[lex.位置 + 1]
+        }
 
         若 nextCh == 47 则 {
             // 单行注释 // ... 一直到换行
@@ -360,6 +398,10 @@
                 lex = lexer前进(lex)  // 跳过 /
                 lex = lexer前进(lex)  // 跳过 *
                 当 lex.当前字符 != 0 则 {
+                    // 检查是否到达文件末尾，避免越界访问
+                    若 lex.位置 + 1 >= lex.长度 则 {
+                        跳出
+                    }
                     若 lex.当前字符 == 42 && lex.源码[lex.位置 + 1] == 47 则 {
                         lex = lexer前进(lex)  // 跳过 *
                         lex = lexer前进(lex)  // 跳过 /
@@ -367,6 +409,10 @@
                     }
                     lex = lexer前进(lex)
                 }
+            } 否则 {
+                // 单独的 / 是除法运算符，不是注释
+                lex = lexer前进(lex)
+                tok.类型 = 4  // 运算符
             }
         }
     }
@@ -523,20 +569,18 @@
     tok.列号 = lex.列号
     tok.开始位置 = 开始
 
-    当 是字母或数字(lex.当前字符) == 1 则 {
+    当 是字母或数字(lex.当前字符) == 1 && lex.位置 < lex.长度 则 {
         lex = lexer前进(lex)
     }
 
     tok.结束位置 = lex.位置
 
-    // 使用文本切片提取实际 token 值
     定义 可变 提取的值: 文本
     提取的值 = 提取子串(lex.源码, 开始, lex.位置)
     tok.值 = 提取的值
 
-    // 检查是否为关键字
     若 是关键字(提取的值) == 1 则 {
-        tok.类型 = 3  // 关键字
+        tok.类型 = 3
     }
 
     lex.当前token = tok
@@ -557,7 +601,7 @@
     tok.列号 = lex.列号
     tok.开始位置 = 开始
 
-    当 是数字(lex.当前字符) == 1 则 {
+    当 是数字(lex.当前字符) == 1 && lex.位置 < lex.长度 则 {
         lex = lexer前进(lex)
     }
 
@@ -589,7 +633,7 @@
     // 跳过开始的双引号
     lex = lexer前进(lex)
 
-    当 lex.当前字符 != 34 && lex.当前字符 != 0 则 {
+    当 lex.当前字符 != 34 && lex.当前字符 != 0 && lex.位置 < lex.长度 则 {
         lex = lexer前进(lex)
     }
 
@@ -621,7 +665,7 @@
     tok.列号 = lex.列号
     tok.开始位置 = 开始
 
-    当 是运算符(lex.当前字符) == 1 则 {
+    当 是运算符(lex.当前字符) == 1 && lex.位置 < lex.长度 则 {
         lex = lexer前进(lex)
     }
 
@@ -650,8 +694,14 @@
     tok.开始位置 = 开始
     tok.结束位置 = lex.位置 + 1
 
+    定义 可变 结束位置: 整数
+    结束位置 = lex.位置 + 1
+    若 结束位置 > lex.长度 则 {
+        结束位置 = lex.长度
+    }
+
     定义 可变 提取的值: 文本
-    提取的值 = 提取子串(lex.源码, 开始, lex.位置 + 1)
+    提取的值 = 提取子串(lex.源码, 开始, 结束位置)
     tok.值 = 提取的值
 
     lex = lexer前进(lex)
@@ -673,6 +723,14 @@
     tok.开始位置 = lex.位置
     tok.结束位置 = lex.位置
 
+    打印("DEBUG lexerNextToken: 位置=")
+    打印整数(lex.位置)
+    打印(" 长度=")
+    打印整数(lex.长度)
+    打印(" 当前字符=")
+    打印整数(lex.当前字符)
+    打印("\n")
+
     lex = lexer跳过空白(lex)
 
     定义 可变 ch: 整数
@@ -693,7 +751,6 @@
     // 字符串
     若 ch == 34 则 {
         lex = lexer读取字符串(lex)
-        lex.当前token = lex.当前token
         返回 lex
     }
 
@@ -706,7 +763,10 @@
     // 注释
     若 ch == 47 则 {
         定义 可变 nextCh: 整数
-        nextCh = lex.源码[lex.位置 + 1]
+        nextCh = 0
+        若 lex.位置 + 1 < lex.长度 则 {
+            nextCh = lex.源码[lex.位置 + 1]
+        }
         若 nextCh == 47 || nextCh == 42 则 {
             lex = lexer读取注释(lex)
             返回 lex
@@ -1243,22 +1303,49 @@
 函数 tokenize(源码: 文本): 列表 {
     定义 可变 lex: Lexer
     lex = lexerInit(源码)
+    打印("DEBUG tokenize: lexerInit 完成\n")
 
     定义 可变 tokens: 列表
     tokens = 列表()
+    打印("DEBUG tokenize: 创建列表完成\n")
 
-    定义 可变 tok: Token
-    tok.类型 = 0
-    tok.值 = ""
-    tok.行号 = 0
-    tok.列号 = 0
-    tok.开始位置 = 0
-    tok.结束位置 = 0
+    定义 可变 循环次数: 整数
+    循环次数 = 0
 
-    当 tok.类型 != 6 则 {
+    当 循环次数 < 1000 则 {
+        若 lex.位置 >= lex.长度 则 {
+            定义 可变 eofTok: Token
+            eofTok.类型 = 6
+            eofTok.值 = "EOF"
+            eofTok.行号 = lex.行号
+            eofTok.列号 = lex.列号
+            eofTok.开始位置 = lex.位置
+            eofTok.结束位置 = lex.位置
+            列表追加(tokens, eofTok)
+            跳出
+        }
+
         lex = lexerNextToken(lex)
+        定义 可变 tok: Token
         tok = lex.当前token
+
+        若 tok.类型 == 6 则 {
+            列表追加(tokens, tok)
+            跳出
+        }
+
+        若 tok.类型 == 7 则 {
+            循环次数 = 循环次数 + 1
+            跳过
+        }
+
         列表追加(tokens, tok)
+        打印("DEBUG Token: 类型=")
+        打印(tok.类型)
+        打印(", 值='")
+        打印(tok.值)
+        打印("'\n")
+        循环次数 = 循环次数 + 1
     }
 
     返回 tokens

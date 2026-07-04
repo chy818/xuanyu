@@ -286,6 +286,7 @@ static KEYWORD_MAP: LazyLock<std::collections::HashMap<&'static str, Keyword>> =
     map.insert("到", Keyword::到);
     map.insert("取自", Keyword::取自);
     map.insert("跳过", Keyword::跳过);
+    map.insert("继续", Keyword::跳过);
     map.insert("退出", Keyword::退出);
     map.insert("跳出", Keyword::跳出);
     map.insert("遍历", Keyword::遍历);

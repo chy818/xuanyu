@@ -4,7 +4,7 @@
  * @description 测试玄语的文件读写功能
  */
 
-引入 "stdlib/io.xy"
+引入 "std/io.xy"
 
 /**
  * 主函数

@@ -95,13 +95,16 @@
 
 函数 执行代码生成(): 文本 {
     定义 可变 cg: Codegen
-    定义 可变 nodeCount: 整数
     cg = codegenInit()
-    nodeCount = codegenRun(0)
-    打印("代码生成完成，生成了 ")
-    打印(nodeCount)
-    打印(" 个节点")
-    返回 ""
+
+    emitModuleHeader(cg, "xuanyu_source")
+    emitTargetData(cg)
+    emitBuiltinDecls(cg)
+    emitFunction(cg, "主", "i64", 10)
+    emitMainWrapper(cg)
+
+    打印("代码生成完成!")
+    返回 cg.output
 }
 
 /* ============ 编译流程 ============ */
@@ -119,6 +122,9 @@
     打印("待编译文件: ")
     打印(源文件路径)
     打印换行()
+
+    /* 读取源码 */
+    源码 = 读取文件(源文件路径)
 
     // 阶段1: 词法分析
     打印("=== 词法分析 ===")
@@ -141,7 +147,15 @@
 
     // 阶段4: 代码生成
     打印("=== 代码生成 ===")
-    执行代码生成()
+    定义 可变 ir: 文本
+    ir = 执行代码生成()
+
+    /* 写入 IR 文件 */
+    定义 可变 ir文件: 文本
+    ir文件 = 源文件路径 + ".ll"
+    写入文件(ir文件, ir)
+    打印("IR已写入: ")
+    打印(ir文件)
 
     打印横线()
     打印("编译成功!")

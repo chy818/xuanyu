@@ -56,17 +56,24 @@ impl ModuleResolver {
     }
 
     /**
-     * 解析模块
+     * 解析模块（带父模块路径上下文，用于相对路径解析）
      */
     pub fn resolve_module(&mut self, module_path: &str) -> Result<ModuleInfo, CompilerError> {
+        self.resolve_module_with_parent(module_path, None)
+    }
+
+    /**
+     * 解析模块，parent_path 为导入该模块的父文件路径
+     */
+    fn resolve_module_with_parent(&mut self, module_path: &str, parent_path: Option<PathBuf>) -> Result<ModuleInfo, CompilerError> {
         // 检查缓存
         if let Some(info) = self.modules.get(module_path) {
             return Ok(info.clone());
         }
 
-        // 查找模块文件
-        let file_path = self.find_module_file(module_path)?;
-        
+        // 查找模块文件（优先从父文件所在目录查找）
+        let file_path = self.find_module_file_with_parent(module_path, parent_path.as_ref())?;
+
         // 读取文件内容
         let source = fs::read_to_string(&file_path)
             .map_err(|e| CompilerError::Lexer(LexerError {
@@ -87,9 +94,10 @@ impl ModuleResolver {
         // 分析依赖
         let dependencies = self.analyze_dependencies(&module);
 
-        // 递归解析依赖
+        // 递归解析依赖（传递当前文件路径作为父路径）
+        let parent = file_path.clone();
         for dep in &dependencies {
-            self.resolve_module(dep)?;
+            self.resolve_module_with_parent(dep, Some(parent.clone()))?;
         }
 
         let module_info = ModuleInfo {
@@ -105,20 +113,27 @@ impl ModuleResolver {
     }
 
     /**
-     * 查找模块文件
+     * 查找模块文件（支持父路径上下文）
      */
-    fn find_module_file(&self, module_path: &str) -> Result<PathBuf, CompilerError> {
-        // 将模块路径转换为文件路径
+    fn find_module_file_with_parent(&self, module_path: &str, parent: Option<&PathBuf>) -> Result<PathBuf, CompilerError> {
         let file_name = format!("{}.xy", module_path.replace("::", "/"));
-        
-        // 搜索所有路径
+
+        // 优先从父文件所在目录查找
+        if let Some(parent_path) = parent {
+            if let Some(parent_dir) = parent_path.parent() {
+                let candidate = parent_dir.join(&file_name);
+                if candidate.exists() {
+                    return Ok(candidate);
+                }
+            }
+        }
+
+        // 搜索全局路径
         for search_path in &self.search_paths {
             let candidate = search_path.join(&file_name);
             if candidate.exists() {
                 return Ok(candidate);
             }
-
-            // 尝试目录模块
             let dir_candidate = search_path.join(module_path.replace("::", "/"));
             let mod_file = dir_candidate.join("mod.xy");
             if mod_file.exists() {
@@ -131,6 +146,13 @@ impl ModuleResolver {
             message: format!("找不到模块: {}", module_path),
             span: crate::lexer::token::Span::dummy()
         }))
+    }
+
+    /**
+     * 查找模块文件（向后兼容，无父路径）
+     */
+    fn find_module_file(&self, module_path: &str) -> Result<PathBuf, CompilerError> {
+        self.find_module_file_with_parent(module_path, None)
     }
 
     /**

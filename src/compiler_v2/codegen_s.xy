@@ -39,7 +39,7 @@
     cg.tempCount = 0
     cg.labelCount = 0
     cg.funcCount = 0
-    cg.output = 列表()
+    cg.output = ""
     cg.indent = 0
     cg.stringConstCount = 0
     cg.funcDefs = 列表()
@@ -58,18 +58,20 @@
 /* ============ 输出函数 ============ */
 
 函数 codegenEmitLine(cg: Codegen, line: 文本) {
+    定义 可变 fullLine: 文本
+    fullLine = ""
     定义 可变 i: 整数
     i = 0
     当 i < cg.indent 则 {
-        打印("  ")
+        fullLine = fullLine + "  "
         i = i + 1
     }
-    打印(line)
+    fullLine = fullLine + line
+    打印(fullLine)
 }
 
 函数 codegenEmit(cg: Codegen, content: 文本) {
     codegenEmitLine(cg, content)
-    列表添加(cg.output, content)
 }
 
 /* ============ 标签和临时变量 ============ */
@@ -1072,13 +1074,13 @@
  * 生成模块头
  */
 函数 emitModuleHeader(cg: Codegen, name: 文本) {
-    打印("; ============================================")
-    打印("; 玄语编译器 v0.2 - 自展版本")
-    打印("; LLVM IR 生成")
-    打印("; ============================================")
-    打印("")
+    codegenEmit(cg, "; ============================================")
+    codegenEmit(cg, "; 玄语编译器 v0.2 - 自展版本")
+    codegenEmit(cg, "; LLVM IR 生成")
+    codegenEmit(cg, "; ============================================")
+    codegenEmit(cg, "")
     codegenEmit(cg, "source_filename = \"" + name + "\"")
-    打印("")
+    codegenEmit(cg, "")
 }
 
 /**
@@ -1285,7 +1287,7 @@
 /* ============ 内置函数声明 ============ */
 
 函数 emitBuiltinDecls(cg: Codegen) {
-    打印("; ==================== 内置函数声明 ====================")
+    codegenEmit(cg, "; ==================== 内置函数声明 ====================")
     codegenEmit(cg, "declare void @print(i8*)")
     codegenEmit(cg, "declare i64 @print_int(i64)")
     codegenEmit(cg, "declare double @print_float(double)")
@@ -1318,7 +1320,7 @@
     codegenEmit(cg, "declare i64 @input_int()")
     codegenEmit(cg, "declare i8* @input_text()")
     
-    打印("")
+    codegenEmit(cg, "")
 }
 
 /* ============ 模块和导入支持 ============ */
@@ -1740,49 +1742,51 @@
  * 生成完整的函数 IR
  */
 函数 emitFunction(cg: Codegen, funcName: 文本, returnType: 文本, nodeCount: 整数) {
-    打印("")
-    打印("define " + returnType + " @" + funcName + "() {")
+    codegenEmit(cg, "")
+    codegenEmit(cg, "define " + returnType + " @" + funcName + "() {")
 
     cg.indent = cg.indent + 1
     cg.currentFunc = funcName
     cg.currentReturnType = returnType
 
     /* 变量分配 */
-    打印("  %result = alloca i64")
+    codegenEmit(cg, "%result = alloca i64")
 
     /* 函数体 - 根据函数名生成不同 IR */
 
     若 funcName == "主" 则 {
         /* 主函数: 返回 0 */
-        打印("  %tmp0 = add i64 0, 0")
-        打印("  ret i64 %tmp0")
+        codegenEmit(cg, "%tmp0 = add i64 0, 0")
+        codegenEmit(cg, "ret i64 %tmp0")
     } 否则 {
         /* 默认返回 0 */
-        打印("  %tmp0 = add i64 0, 0")
-        打印("  ret i64 %tmp0")
+        codegenEmit(cg, "%tmp0 = add i64 0, 0")
+        codegenEmit(cg, "ret i64 %tmp0")
     }
 
     cg.indent = cg.indent - 1
-    打印("}")
+    codegenEmit(cg, "}")
 }
 
 /**
  * 生成 main 函数包装
  */
 函数 emitMainWrapper(cg: Codegen) {
-    打印("")
-    打印("define i32 @main() {")
+    codegenEmit(cg, "")
+    codegenEmit(cg, "define i32 @main(i32 %argc, i8** %argv) {")
     cg.indent = 1
+
+    codegenEmit(cg, "call void @init_args(i32 %argc, i8** %argv)")
 
     定义 可变 result: 文本
     result = codegenNewTemp(cg)
-    打印("  %" + result + " = call i64 @主()")
+    codegenEmit(cg, "%" + result + " = call i64 @xy_main()")
     定义 可变 truncVal: 文本
     truncVal = codegenNewTemp(cg)
-    打印("  %" + truncVal + " = trunc i64 %" + result + " to i32")
+    codegenEmit(cg, "%" + truncVal + " = trunc i64 %" + result + " to i32")
 
-    打印("  ret i32 %" + truncVal)
-    打印("}")
+    codegenEmit(cg, "ret i32 %" + truncVal)
+    codegenEmit(cg, "}")
 }
 
 /* ============ AST 遍历和语句生成 ============ */
@@ -2653,16 +2657,7 @@
     打印(cg.funcCount)
     打印(" 个函数")
 
-    /* 构建最终 IR 字符串 */
-    定义 可变 result: 文本
-    result = ""
-    定义 可变 i: 整数
-    i = 0
-    当 i < 列表长度(cg.output) 则 {
-        result = result + 列表获取(cg.output, i) + "\n"
-        i = i + 1
-    }
-    返回 result
+    返回 ""
 }
 
 /**
@@ -2775,7 +2770,11 @@
 
     /* 保存当前状态 */
     定义 可变 fullFuncName: 文本
-    fullFuncName = cg.moduleName + "_" + funcName
+    若 funcName == "主" 则 {
+        fullFuncName = "xy_main"
+    } 否则 {
+        fullFuncName = cg.moduleName + "_" + funcName
+    }
     cg.currentFunc = fullFuncName
     cg.currentFunctionIndex = cg.functionIndexCounter
     cg.functionIndexCounter = cg.functionIndexCounter + 1
@@ -2816,7 +2815,11 @@
     
     /* 生成函数定义 - 添加模块名前缀以避免重复符号 */
     定义 可变 fullFuncName: 文本
-    fullFuncName = cg.moduleName + "_" + funcName
+    若 funcName == "主" 则 {
+        fullFuncName = "xy_main"
+    } 否则 {
+        fullFuncName = cg.moduleName + "_" + funcName
+    }
     codegenEmit(cg, "define " + returnType + " @" + fullFuncName + "(" + paramStr + ") {")
     cg.indent = cg.indent + 1
 
@@ -3444,7 +3447,7 @@
         strContent = ""
         i = 1
         当 i < 文本长度(value) - 1 则 {
-            strContent = strContent + value[i]
+            strContent = strContent + 整数转字符(value[i])
             i = i + 1
         }
 
@@ -3554,6 +3557,112 @@
     定义 可变 result: 文本
     result = codegenNewTemp(cg)
 
+    /* 中文函数名到C运行时函数名的映射 */
+    定义 可变 映射后的函数名: 文本
+    映射后的函数名 = funcName
+
+    若 funcName == "文本长度" 则 {
+        映射后的函数名 = "rt_string_len"
+    } 否则 若 funcName == "文本拼接" 则 {
+        映射后的函数名 = "rt_string_concat"
+    } 否则 若 funcName == "列表长度" 则 {
+        映射后的函数名 = "rt_list_len"
+    } 否则 若 funcName == "列表" 则 {
+        映射后的函数名 = "rt_list_new"
+    } 否则 若 funcName == "列表追加" 则 {
+        映射后的函数名 = "rt_list_append"
+    } 否则 若 funcName == "列表获取" 则 {
+        映射后的函数名 = "rt_list_get"
+    } 否则 若 funcName == "列表设置" 则 {
+        映射后的函数名 = "rt_list_set"
+    } 否则 若 funcName == "打印" 则 {
+        映射后的函数名 = "rt_print"
+    } 否则 若 funcName == "打印整数" 则 {
+        映射后的函数名 = "rt_print_int"
+    } 否则 若 funcName == "输入整数" 则 {
+        映射后的函数名 = "rt_input_int"
+    } 否则 若 funcName == "输入文本" 则 {
+        映射后的函数名 = "rt_input_text"
+    } 否则 若 funcName == "读取文件" 则 {
+        映射后的函数名 = "file_read"
+    } 否则 若 funcName == "写入文件" 则 {
+        映射后的函数名 = "file_write"
+    } 否则 若 funcName == "文件存在" 则 {
+        映射后的函数名 = "file_exists"
+    } 否则 若 funcName == "删除文件" 则 {
+        映射后的函数名 = "file_delete"
+    } 否则 若 funcName == "执行命令" 则 {
+        映射后的函数名 = "exec_cmd"
+    } 否则 若 funcName == "命令行参数" 则 {
+        映射后的函数名 = "argv"
+    } 否则 若 funcName == "参数个数" 则 {
+        映射后的函数名 = "argc"
+    } 否则 若 funcName == "运行时错误" 则 {
+        映射后的函数名 = "rt_error"
+    } 否则 若 funcName == "是空格" 则 {
+        映射后的函数名 = "is_space"
+    } 否则 若 funcName == "是数字" 则 {
+        映射后的函数名 = "is_digit"
+    } 否则 若 funcName == "是字母" 则 {
+        映射后的函数名 = "is_alpha"
+    } 否则 若 funcName == "是字母数字" 则 {
+        映射后的函数名 = "is_alnum"
+    } 否则 若 funcName == "utf8字节长度" 则 {
+        映射后的函数名 = "rt_utf8_byte_length"
+    } 否则 若 funcName == "是utf8首字节" 则 {
+        映射后的函数名 = "rt_is_utf8_leader"
+    } 否则 若 funcName == "是utf8续字节" 则 {
+        映射后的函数名 = "rt_is_utf8_continuation"
+    } 否则 若 funcName == "字符串拼接" 则 {
+        映射后的函数名 = "rt_string_concat"
+    } 否则 若 funcName == "整数转文本" 则 {
+        映射后的函数名 = "rt_int_to_str"
+    } 否则 若 funcName == "文本转整数" 则 {
+        映射后的函数名 = "rt_str_to_int"
+    } 否则 若 funcName == "取文本长度" 则 {
+        映射后的函数名 = "rt_string_len"
+    } 否则 若 funcName == "文本连接" 则 {
+        映射后的函数名 = "rt_string_concat"
+    } 否则 若 funcName == "文本截取" 则 {
+        映射后的函数名 = "rt_string_substring"
+    } 否则 若 funcName == "文本查找" 则 {
+        映射后的函数名 = "rt_string_indexOf"
+    } 否则 若 funcName == "文本转大写" 则 {
+        映射后的函数名 = "rt_string_toUpperCase"
+    } 否则 若 funcName == "文本转小写" 则 {
+        映射后的函数名 = "rt_string_toLowerCase"
+    } 否则 若 funcName == "创建列表" 则 {
+        映射后的函数名 = "rt_list_new"
+    } 否则 若 funcName == "取列表长度" 则 {
+        映射后的函数名 = "rt_list_len"
+    } 否则 若 funcName == "列表添加" 则 {
+        映射后的函数名 = "rt_list_append"
+    } 否则 若 funcName == "列表清空" 则 {
+        映射后的函数名 = "rt_list_clear"
+    } 否则 若 funcName == "列表克隆" 则 {
+        映射后的函数名 = "rt_list_clone"
+    } 否则 若 funcName == "文件读取" 则 {
+        映射后的函数名 = "file_read"
+    } 否则 若 funcName == "文件写入" 则 {
+        映射后的函数名 = "file_write"
+    } 否则 若 funcName == "取参数个数" 则 {
+        映射后的函数名 = "argc"
+    } 否则 若 funcName == "取参数" 则 {
+        映射后的函数名 = "argv"
+    } 否则 若 funcName == "取时间戳" 则 {
+        映射后的函数名 = "rt_time"
+    } 否则 若 funcName == "执行系统命令" 则 {
+        映射后的函数名 = "exec_cmd"
+    } 否则 若 funcName == "命令输出" 则 {
+        映射后的函数名 = "cmd_output"
+    } 否则 若 funcName == "退出" 则 {
+        映射后的函数名 = "rt_exit"
+    } 否则 若 funcName == "申请内存" 则 {
+        映射后的函数名 = "rt_malloc"
+    } 否则 若 funcName == "释放内存块" 则 {
+        映射后的函数名 = "rt_free"
+    }
+
     /* 内置函数返回类型映射表 */
     定义 可变 returnType: 文本
     returnType = "i64"
@@ -3564,6 +3673,28 @@
         若 funcName == "print_float" 则 {
             returnType = "double"
         }
+    }
+
+    /* void返回函数 */
+    若 funcName == "打印" || funcName == "打印整数" || 
+       funcName == "列表追加" || funcName == "列表设置" || 
+       funcName == "列表清空" || funcName == "运行时错误" || 
+       funcName == "退出" || funcName == "释放内存块" ||
+       funcName == "列表添加" 则 {
+        returnType = "void"
+    }
+
+    /* i8*指针返回函数 */
+    若 funcName == "文本拼接" || funcName == "文本连接" || 
+       funcName == "列表" || funcName == "列表获取" || 
+       funcName == "文件读取" || funcName == "命令行参数" || 
+       funcName == "输入文本" || funcName == "申请内存" ||
+       funcName == "文本截取" || funcName == "文本转大写" || 
+       funcName == "文本转小写" || funcName == "创建列表" ||
+       funcName == "列表克隆" || funcName == "命令输出" ||
+       funcName == "取列表元素" || funcName == "添加列表元素" ||
+       funcName == "获取参数" || funcName == "获取命令输出" 则 {
+        returnType = "i8*"
     }
 
     /* 处理函数参数 - 根据函数名确定参数类型 */
@@ -3581,9 +3712,9 @@
             定义 可变 argValue: 文本
             argValue = codegen遍历表达式(cg, argNode)
 
-            /* 根据函数名和参数索引确定参数类型 */
+            /* 根据映射后的函数名和参数索引确定参数类型 */
             定义 可变 paramType: 文本
-            paramType = codegen获取参数类型(funcName, i)
+            paramType = codegen获取参数类型(映射后的函数名, i)
 
             /* 将参数值添加到参数列表 */
             若 i > 0 则 {
@@ -3596,10 +3727,20 @@
     }
 
     /* 生成函数调用 IR */
-    若 argStr != "" 则 {
-        codegenEmit(cg, "  %" + result + " = call " + returnType + " @" + funcName + "(" + argStr + ")")
+    若 returnType == "void" 则 {
+        /* void函数不需要返回值 */
+        若 argStr != "" 则 {
+            codegenEmit(cg, "  call void @" + 映射后的函数名 + "(" + argStr + ")")
+        } 否则 {
+            codegenEmit(cg, "  call void @" + 映射后的函数名 + "()")
+        }
+        result = ""
     } 否则 {
-        codegenEmit(cg, "  %" + result + " = call " + returnType + " @" + funcName + "()")
+        若 argStr != "" 则 {
+            codegenEmit(cg, "  %" + result + " = call " + returnType + " @" + 映射后的函数名 + "(" + argStr + ")")
+        } 否则 {
+            codegenEmit(cg, "  %" + result + " = call " + returnType + " @" + 映射后的函数名 + "()")
+        }
     }
 
     返回 result
@@ -3670,6 +3811,169 @@
 
     /* 打印字符串函数 */
     若 funcName == "print_string" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_list_new() - 无参数 */
+    若 funcName == "rt_list_new" 则 {
+        返回 "i64"
+    }
+
+    /* file_read(i8*) - 文件路径是指针 */
+    若 funcName == "file_read" 则 {
+        返回 "i8*"
+    }
+
+    /* file_write(i8*, i8*) - 路径和内容都是指针 */
+    若 funcName == "file_write" 则 {
+        返回 "i8*"
+    }
+
+    /* file_exists(i8*) - 文件路径是指针 */
+    若 funcName == "file_exists" 则 {
+        返回 "i8*"
+    }
+
+    /* file_delete(i8*) - 文件路径是指针 */
+    若 funcName == "file_delete" 则 {
+        返回 "i8*"
+    }
+
+    /* exec_cmd(i8*) - 命令字符串是指针 */
+    若 funcName == "exec_cmd" 则 {
+        返回 "i8*"
+    }
+
+    /* argv(i64) - 索引是整数 */
+    若 funcName == "argv" 则 {
+        返回 "i64"
+    }
+
+    /* argc() - 无参数 */
+    若 funcName == "argc" 则 {
+        返回 "i64"
+    }
+
+    /* rt_error(i8*) - 错误消息是指针 */
+    若 funcName == "rt_error" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_input_int() - 无参数 */
+    若 funcName == "rt_input_int" 则 {
+        返回 "i64"
+    }
+
+    /* rt_input_text() - 无参数 */
+    若 funcName == "rt_input_text" 则 {
+        返回 "i64"
+    }
+
+    /* rt_print_int(i64) - 整数参数 */
+    若 funcName == "rt_print_int" 则 {
+        返回 "i64"
+    }
+
+    /* rt_int_to_str(i64) - 整数参数 */
+    若 funcName == "rt_int_to_str" 则 {
+        返回 "i64"
+    }
+
+    /* rt_str_to_int(i8*) - 字符串参数 */
+    若 funcName == "rt_str_to_int" 则 {
+        返回 "i8*"
+    }
+
+    /* is_space(i8*) - 字符是指针 */
+    若 funcName == "is_space" 则 {
+        返回 "i8*"
+    }
+
+    /* is_digit(i8*) - 字符是指针 */
+    若 funcName == "is_digit" 则 {
+        返回 "i8*"
+    }
+
+    /* is_alpha(i8*) - 字符是指针 */
+    若 funcName == "is_alpha" 则 {
+        返回 "i8*"
+    }
+
+    /* is_alnum(i8*) - 字符是指针 */
+    若 funcName == "is_alnum" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_utf8_byte_length(i64) - 整数参数 */
+    若 funcName == "rt_utf8_byte_length" 则 {
+        返回 "i64"
+    }
+
+    /* rt_is_utf8_leader(i64) - 整数参数 */
+    若 funcName == "rt_is_utf8_leader" 则 {
+        返回 "i64"
+    }
+
+    /* rt_is_utf8_continuation(i64) - 整数参数 */
+    若 funcName == "rt_is_utf8_continuation" 则 {
+        返回 "i64"
+    }
+
+    /* rt_string_substring(i8*, i64, i64) - 第一个是指针，后续是整数 */
+    若 funcName == "rt_string_substring" 则 {
+        若 paramIndex == 0 则 {
+            返回 "i8*"
+        }
+        返回 "i64"
+    }
+
+    /* rt_string_indexOf(i8*, i8*) - 两个都是指针 */
+    若 funcName == "rt_string_indexOf" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_string_toUpperCase(i8*) - 指针参数 */
+    若 funcName == "rt_string_toUpperCase" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_string_toLowerCase(i8*) - 指针参数 */
+    若 funcName == "rt_string_toLowerCase" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_list_clear(i8*) - 指针参数 */
+    若 funcName == "rt_list_clear" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_list_clone(i8*) - 指针参数 */
+    若 funcName == "rt_list_clone" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_time() - 无参数 */
+    若 funcName == "rt_time" 则 {
+        返回 "i64"
+    }
+
+    /* cmd_output(i8*) - 指针参数 */
+    若 funcName == "cmd_output" 则 {
+        返回 "i8*"
+    }
+
+    /* rt_exit(i64) - 整数参数 */
+    若 funcName == "rt_exit" 则 {
+        返回 "i64"
+    }
+
+    /* rt_malloc(i64) - 整数参数 */
+    若 funcName == "rt_malloc" 则 {
+        返回 "i64"
+    }
+
+    /* rt_free(i8*) - 指针参数 */
+    若 funcName == "rt_free" 则 {
         返回 "i8*"
     }
 

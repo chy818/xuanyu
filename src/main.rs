@@ -236,17 +236,20 @@ fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
             match llc_result {
                 Ok(status) => {
                     if !status.success() {
-                        // 保留 IR 文件用于调试
                         eprintln!("IR 文件保存在: {}", temp_ir);
                         return Err(format!("llc 执行失败，退出码: {}", status.code().unwrap_or(-1)));
                     }
                 }
                 Err(e) => {
-                    // 保留 IR 文件用于调试
                     eprintln!("IR 文件保存在: {}", temp_ir);
                     return Err(format!("无法执行 llc: {}\n请确保已安装 LLVM 并配置环境变量。", e));
                 }
             }
+
+            let _guard = TempFileGuard {
+                ir_file: temp_ir.clone(),
+                obj_file: temp_obj.to_string(),
+            };
 
             println!("对象文件生成成功: {}", temp_obj);
 
@@ -296,12 +299,10 @@ fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
             match compile_runtime_result {
                 Ok(status) => {
                     if !status.success() {
-                        cleanup(&temp_ir, temp_obj);
                         return Err(format!("编译 runtime.c 失败，退出码: {}", status.code().unwrap_or(-1)));
                     }
                 }
                 Err(e) => {
-                    cleanup(&temp_ir, temp_obj);
                     return Err(format!("无法执行 clang: {}\n请确保已安装 Clang/LLVM 并配置环境变量.", e));
                 }
             }
@@ -317,13 +318,10 @@ fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
             match linker_result {
                 Ok(status) => {
                     if !status.success() {
-                        cleanup(&temp_ir, temp_obj);
                         return Err(format!("链接失败，退出码: {}", status.code().unwrap_or(-1)));
                     }
                 }
                 Err(e) => {
-                    let _ = fs::remove_file(&temp_ir);
-                    let _ = fs::remove_file(temp_obj);
                     return Err(format!("无法执行 clang: {}\n请确保已安装 Clang/LLVM 并配置环境变量.", e));
                 }
             }
@@ -332,9 +330,6 @@ fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
 
             // 更新缓存
             let _ = update_cache(filename, &source.clone());
-
-            // 清理临时文件
-            cleanup(&temp_ir, temp_obj);
 
             println!("\n编译成功!");
 
@@ -454,6 +449,27 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
         }
     }
 
+    // 清空导入列表，因为所有导入的模块已经被合并
+    // 语义分析器会尝试重新加载导入的模块，导致重复处理
+    merged_module.imports.clear();
+
+    // 语义分析
+    if mode != RunMode::IrPure {
+        println!("\n=== 语义分析 ===");
+    }
+    xuanyu::analyze(&merged_module)
+        .map_err(|errors| {
+            let msg: Vec<String> = errors.iter()
+                .map(|e| format!("[{}]: {} (行 {}, 列 {})", 
+                    e.code, e.message, e.span.start_line, e.span.start_column))
+                .collect();
+            format!("语义错误 ({} 个): {}", errors.len(), msg.join(", "))
+        })?;
+
+    if mode != RunMode::IrPure {
+        println!("语义分析完成，无错误");
+    }
+
     // 一次性生成合并后的 IR
     let combined_ir = xuanyu::generate_ir(&merged_module)
         .map_err(|e| format!("代码生成错误: {}", e.message))?;
@@ -498,17 +514,20 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
             match llc_result {
                 Ok(status) => {
                     if !status.success() {
-                        // 保留 IR 文件用于调试
                         eprintln!("IR 文件保存在: {}", temp_ir);
                         return Err(format!("llc 执行失败，退出码: {}", status.code().unwrap_or(-1)));
                     }
                 }
                 Err(e) => {
-                    // 保留 IR 文件用于调试
                     eprintln!("IR 文件保存在: {}", temp_ir);
                     return Err(format!("无法执行 llc: {}\n请确保已安装 LLVM 并配置环境变量。", e));
                 }
             }
+
+            let _guard = TempFileGuard {
+                ir_file: temp_ir.clone(),
+                obj_file: temp_obj.to_string(),
+            };
 
             println!("对象文件生成成功: {}", temp_obj);
 
@@ -558,12 +577,10 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
             match compile_runtime_result {
                 Ok(status) => {
                     if !status.success() {
-                        cleanup(&temp_ir, temp_obj);
                         return Err(format!("编译 runtime.c 失败，退出码: {}", status.code().unwrap_or(-1)));
                     }
                 }
                 Err(e) => {
-                    cleanup(&temp_ir, temp_obj);
                     return Err(format!("无法执行 clang: {}\n请确保已安装 Clang/LLVM 并配置环境变量.", e));
                 }
             }
@@ -579,21 +596,15 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
             match linker_result {
                 Ok(status) => {
                     if !status.success() {
-                        cleanup(&temp_ir, temp_obj);
                         return Err(format!("链接失败，退出码: {}", status.code().unwrap_or(-1)));
                     }
                 }
                 Err(e) => {
-                    let _ = fs::remove_file(&temp_ir);
-                    let _ = fs::remove_file(temp_obj);
                     return Err(format!("无法执行 clang: {}\n请确保已安装 Clang/LLVM 并配置环境变量.", e));
                 }
             }
 
             println!("链接成功: {}", output_exe);
-
-            // 清理临时文件
-            cleanup(&temp_ir, temp_obj);
 
             println!("\n编译成功!");
 
@@ -636,11 +647,20 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
     Ok(())
 }
 
-fn cleanup(ir_file: &str, obj_file: &str) {
-    let _ = fs::remove_file(ir_file);
-    let _ = fs::remove_file(obj_file);
-    let _ = fs::remove_file("runtime.obj");
+struct TempFileGuard {
+    ir_file: String,
+    obj_file: String,
 }
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.ir_file);
+        let _ = fs::remove_file(&self.obj_file);
+        let _ = fs::remove_file("runtime.obj");
+    }
+}
+
+
 
 fn get_source_hash(source: &str) -> u64 {
     use std::collections::hash_map::DefaultHasher;

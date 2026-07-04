@@ -67,8 +67,8 @@ cargo test
 
 ```
 xuanyu/
-├── src/                        # Rust 主线编译器 (~2800 行)
-│   ├── main.rs                 # CLI 入口
+├── src/                        # L1: Rust 宿主编译器 (~2800 行)
+│   ├── main.rs                 # CLI 入口（xy 命令）
 │   ├── lib.rs                  # 核心库导出
 │   ├── lexer/                  # 词法分析
 │   │   ├── mod.rs
@@ -85,35 +85,68 @@ xuanyu/
 │   │   └── codegen.rs         # LLVM IR 生成
 │   ├── types/                  # 类型系统
 │   │   └── types.rs
-│   └── error/                  # 错误处理
-│       └── error.rs
-├── src/compiler_v2/            # 自举编译器 (XY 实现, ~8800 行)
-│   ├── main.xy                 # 主入口
-│   ├── compiler.xy             # 编译器整合
-│   ├── ast.xy                  # AST 定义
-│   ├── lexer.xy                # 词法分析 (~1070 行)
-│   ├── parser.xy               # 语法解析 (~1850 行)
-│   ├── sema.xy                # 语义分析 (~1100 行)
-│   ├── codegen.xy             # 代码生成 (~2700 行)
-│   ├── runtime.xy             # 运行时库 (~2100 行)
-│   ├── utils.xy               # 工具函数
-│   └── hello.xy               # 自举测试用例
+│   ├── error/                  # 错误处理
+│   │   └── error.rs
+│   ├── compiler/               # 编译器核心
+│   │   ├── mod.rs
+│   │   ├── module.rs          # 模块解析
+│   │   └── incremental.rs     # 增量编译
+│   ├── package/                # 包管理
+│   │   └── mod.rs
+│   └── compiler_v2/            # L2: XY 自举编译器 (~8800 行)
+│       ├── main.xy             # 主入口
+│       ├── compiler.xy         # 编译器整合
+│       ├── lexer.xy            # 词法分析 (~1070 行)
+│       ├── parser.xy           # 语法解析 (~1850 行)
+│       ├── sema.xy            # 语义分析 (~1100 行)
+│       ├── codegen.xy         # 代码生成 (~2700 行)
+│       ├── types.xy           # 类型定义
+│       ├── utils.xy           # 工具函数
+│       ├── std.xy             # 标准库接口
+│       └── runtime.xy         # 运行时声明
 ├── runtime/                    # C 运行时库
-│   ├── runtime.c               # 主运行时（中文函数名）
-│   └── runtime_clean.c         # 干净版本（ASCII 函数名）
+│   └── runtime.c               # 主运行时（内存/字符串/文件/列表操作）
+├── std/                        # 标准库（合并原 runtime_xy/ 和 stdlib/）
+│   ├── std.xy                  # 标准库入口
+│   ├── array.xy                # 数组操作
+│   ├── io.xy                   # 输入输出
+│   ├── math.xy                 # 数学函数
+│   ├── string.xy               # 字符串操作
+│   └── README.md
 ├── examples/                   # 示例程序
-│   ├── hello.xy                # Hello World
-│   ├── test_*.xy              # 测试用例
-│   └── *.xy                   # 其他示例
-├── tests/                      # 测试脚本
-│   └── bootstrap_test.sh       # 自举验证脚本
+├── tests/                      # 测试目录
+│   ├── unit/                   # Rust 单元测试
+│   ├── integration/            # XY 集成测试
+│   ├── bootstrap/              # 自举测试
+│   ├── fixtures/               # 测试夹具（多文件测试）
+│   │   └── test_multi/
+│   ├── run_tests.ps1           # 测试运行脚本
+│   ├── bootstrap_test.sh       # 自举测试脚本
+│   └── README.md
 ├── docs/                       # 设计文档
-│   ├── XY语言_v0.1规范.md     # 语言规范
-│   ├── VISION.md              # 项目愿景
-│   └── *.md                   # 其他文档
-├── Cargo.toml
-└── README.md
+├── build/                      # 构建产物和临时文件
+│   ├── scripts/                # 构建脚本
+│   │   └── build_l2.bat
+│   └── ...                     # 构建产物（.rustc_info.json 等）
+├── vscode-extension/           # VS Code 扩展
+├── build_l2.bat                # 根目录构建入口
+└── Cargo.toml
 ```
+
+### L1 vs L2 编译器说明
+
+| 编译器 | 实现语言 | 用途 | 状态 |
+|--------|---------|------|------|
+| **L1 (src/)** | Rust | 宿主编译器，用于编译 XY 源代码 | 生产就绪 |
+| **L2 (src/compiler_v2/)** | XY | 自举编译器，用 XY 自身实现 | 开发中 |
+
+**自举流程**：
+```
+Phase 1: Rust (L1) 编译 XY 源代码 → 生成可执行文件
+Phase 2: XY (L2) 编译器编译自身源代码 → 验证自举成功
+```
+
+L1 编译器是当前生产使用的编译器，L2 编译器是为了验证语言自举能力而开发的。
 
 ---
 

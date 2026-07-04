@@ -2362,8 +2362,11 @@ impl Parser {
 
             // 整数字面量
             TokenType::整数字面量 => {
-                let value: i64 = token.literal.parse()
-                    .unwrap_or(0);
+                let value: i64 = if token.literal.starts_with("0x") || token.literal.starts_with("0X") {
+                    i64::from_str_radix(&token.literal[2..], 16).unwrap_or(0)
+                } else {
+                    token.literal.parse().unwrap_or(0)
+                };
                 let span = token.span;
                 self.position += 1;
                 Ok(Expr::Literal(LiteralExpr::new(

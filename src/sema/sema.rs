@@ -457,11 +457,11 @@ impl SemanticAnalyzer {
         }
 
         // 尝试3: 相对于项目根目录 (当前工作目录)
-        // 检查是否是 stdlib 模块
-        if !path.starts_with("stdlib/") && !path.starts_with("./") && !path.starts_with("../") {
-            let stdlib_path = format!("stdlib/{}", path);
-            if std::path::Path::new(&stdlib_path).exists() {
-                return Ok(stdlib_path);
+        // 检查是否是 std 标准库模块
+        if !path.starts_with("std/") && !path.starts_with("./") && !path.starts_with("../") {
+            let std_path = format!("std/{}", path);
+            if std::path::Path::new(&std_path).exists() {
+                return Ok(std_path);
             }
         }
 
@@ -473,7 +473,7 @@ impl SemanticAnalyzer {
         // 所有尝试都失败
         Err(vec![TypeError {
             code: "E0428".to_string(),
-            message: format!("无法找到模块 '{}' (已尝试相对于当前模块目录和 stdlib 目录)", path),
+            message: format!("无法找到模块 '{}' (已尝试相对于当前模块目录和 std 目录)", path),
             span: Span::dummy(),
         }])
     }
