@@ -1084,6 +1084,9 @@ impl Parser {
             .ok_or_else(|| ParserError::unexpected_token_at(1, 1, "期望语句"))?;
 
         match &token.token_type {
+            // 函数定义: 函数 主(): 整数 { ... }
+            TokenType::Keyword(Keyword::函数) => self.parse_function().map(Stmt::Fn),
+            
             // 变量声明: 定义 x: 整数 = 10
             TokenType::Keyword(Keyword::定义) => self.parse_let_statement(),
             
@@ -1300,6 +1303,34 @@ impl Parser {
 
         // 消耗 '定义' 关键字
         self.position += 1;
+
+        // 处理类型别名: 定义 类型 NodeId = 整数
+        if self.match_keyword(&Keyword::类型别名) {
+            let alias_name = match self.current() {
+                Some(Token { token_type: TokenType::标识符, literal, .. }) => {
+                    literal.clone()
+                }
+                _ => {
+                    return Err(ParserError::unexpected_token(
+                        "类型别名",
+                        &self.current().map(|t| t.literal.clone()).unwrap_or_default(),
+                        self.current().map(|t| t.span).unwrap_or(Span::dummy())
+                    ));
+                }
+            };
+            self.position += 1;
+            
+            self.expect(&TokenType::赋值)?;
+            
+            let aliased_type = self.parse_type()?;
+            
+            let end_span = self.previous().unwrap().span.clone();
+            return Ok(Stmt::TypeAlias(TypeAlias {
+                name: alias_name,
+                aliased_type,
+                span: start_span.merge(end_span),
+            }));
+        }
 
         // 可变修饰符: 定义 可变 x = 1
         let is_mutable = self.match_keyword(&Keyword::可变);
@@ -1797,19 +1828,32 @@ impl Parser {
         // 先解析可能的左侧（用于赋值表达式的左手边）
         let left = self.parse_or_expression()?;
 
-        if self.match_token(&TokenType::赋值) {
-            // 解析右侧表达式（完整的表达式，包括二元操作符）
-            let right = self.parse_expression()?;
-            let span = left.span().merge(right.span());
-            return Ok(Expr::Binary(BinaryExpr::new(
-                BinaryOp::Assign,
-                Box::new(left),
-                Box::new(right),
-                span
-            )));
-        }
+        // 检查复合赋值运算符
+        let op = if self.match_token(&TokenType::赋值) {
+            BinaryOp::Assign
+        } else if self.match_token(&TokenType::加等于) {
+            BinaryOp::AddAssign
+        } else if self.match_token(&TokenType::减等于) {
+            BinaryOp::SubAssign
+        } else if self.match_token(&TokenType::乘等于) {
+            BinaryOp::MulAssign
+        } else if self.match_token(&TokenType::除等于) {
+            BinaryOp::DivAssign
+        } else if self.match_token(&TokenType::取余等于) {
+            BinaryOp::RemAssign
+        } else {
+            return Ok(left);
+        };
 
-        Ok(left)
+        // 解析右侧表达式（完整的表达式，包括二元操作符）
+        let right = self.parse_expression()?;
+        let span = left.span().merge(right.span());
+        Ok(Expr::Binary(BinaryExpr::new(
+            op,
+            Box::new(left),
+            Box::new(right),
+            span
+        )))
     }
 
     /**

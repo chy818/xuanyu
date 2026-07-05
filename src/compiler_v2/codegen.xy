@@ -3517,7 +3517,7 @@
         strContent = ""
         i = 1
         当 i < 文本长度(value) - 1 则 {
-            strContent = strContent + value[i]
+            strContent = strContent + 编码转字符(value[i])
             i = i + 1
         }
 

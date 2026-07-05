@@ -11,6 +11,7 @@ use std::process::{Command, exit};
 use std::time::SystemTime;
 
 use xuanyu::compiler::MultiFileCompiler;
+use xuanyu::ast::Expr;
 
 #[cfg(target_os = "windows")]
 fn setup_windows_console() {
@@ -45,7 +46,9 @@ fn main() {
     let mut input_file = String::new();
     let mut run_mode = RunMode::IrOnly; // 默认只生成 IR
 
-    for (i, arg) in args.iter().enumerate() {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
         match arg.as_str() {
             "-h" | "--help" => {
                 print_usage(&args[0]);
@@ -53,15 +56,29 @@ fn main() {
             }
             "--run" => {
                 run_mode = RunMode::Run;
+                i += 1;
             }
             "--build" => {
                 run_mode = RunMode::Build;
+                i += 1;
             }
             "--ir" => {
                 run_mode = RunMode::IrOnly;
+                i += 1;
             }
             "--ir-pure" => {
                 run_mode = RunMode::IrPure;
+                i += 1;
+            }
+            "--ir-file" => {
+                if i + 1 < args.len() {
+                    run_mode = RunMode::IrFile(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("错误: --ir-file 需要指定输出文件路径");
+                    print_usage(&args[0]);
+                    exit(1);
+                }
             }
             "repl" | "--repl" | "-i" => {
                 // 启动 REPL 模式
@@ -72,6 +89,7 @@ fn main() {
                 if i > 0 && !arg.starts_with('-') && input_file.is_empty() {
                     input_file = arg.clone();
                 }
+                i += 1;
             }
         }
     }
@@ -89,10 +107,11 @@ fn main() {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum RunMode {
     IrOnly,  // 只生成 IR（带调试信息）
     IrPure,  // 只输出纯 IR（无调试信息）
+    IrFile(String),  // 将 IR 写入指定文件
     Build,   // 生成可执行文件
     Run,     // 编译并运行
 }
@@ -194,7 +213,14 @@ fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
     if mode != RunMode::IrPure {
         println!("\n=== 代码生成 ===");
     }
-    let ir = xuanyu::generate_ir(&ast)
+    
+    // 提取文件名作为模块名，用于生成唯一的函数名（避免多模块链接时符号冲突）
+    let module_name = Path::new(filename)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("");
+    
+    let ir = xuanyu::generate_ir_with_module_name(&ast, module_name)
         .map_err(|e| format!("代码生成错误 [{}]: {}", e.code, e.message))?;
 
     if mode != RunMode::IrPure {
@@ -209,8 +235,12 @@ fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
             println!("\n编译成功!");
         }
         RunMode::IrPure => {
-            // 只输出纯 IR，没有其他信息
             println!("{}", ir);
+        }
+        RunMode::IrFile(filepath) => {
+            fs::write(&filepath, &ir)
+                .map_err(|e| format!("无法写入 IR 文件: {}", e))?;
+            println!("IR 已写入: {}", filepath);
         }
         RunMode::Build | RunMode::Run => {
             // 保存 IR 到临时文件 - 使用唯一名称
@@ -372,6 +402,92 @@ fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
     Ok(())
 }
 
+fn update_expr_function_names(expr: &mut Expr, module_name: &str, func_names: &[String]) {
+    match expr {
+        Expr::Call(call) => {
+            if let Expr::Identifier(ident) = &mut *call.function {
+                let original_name = ident.name.clone();
+                if func_names.contains(&original_name) && original_name != "主" && original_name != "主函数" {
+                    ident.name = format!("{}::{}", module_name, original_name);
+                }
+            }
+            update_expr_function_names(&mut *call.function, module_name, func_names);
+            for arg in &mut call.arguments {
+                update_expr_function_names(arg, module_name, func_names);
+            }
+        }
+        Expr::Binary(binary) => {
+            update_expr_function_names(&mut binary.left, module_name, func_names);
+            update_expr_function_names(&mut binary.right, module_name, func_names);
+        }
+        Expr::Unary(unary) => {
+            update_expr_function_names(&mut unary.operand, module_name, func_names);
+        }
+        Expr::MemberAccess(member) => {
+            update_expr_function_names(&mut member.object, module_name, func_names);
+        }
+        Expr::IndexAccess(index) => {
+            update_expr_function_names(&mut index.object, module_name, func_names);
+            update_expr_function_names(&mut index.index, module_name, func_names);
+        }
+        Expr::ListLiteral(list) => {
+            for item in &mut list.elements {
+                update_expr_function_names(item, module_name, func_names);
+            }
+        }
+        Expr::ListComprehension(list_comp) => {
+            update_expr_function_names(&mut list_comp.output, module_name, func_names);
+            update_expr_function_names(&mut list_comp.iterable, module_name, func_names);
+            if let Some(cond) = &mut list_comp.condition {
+                update_expr_function_names(cond, module_name, func_names);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn update_stmt_function_names(stmt: &mut xuanyu::ast::Stmt, module_name: &str, func_names: &[String]) {
+    match stmt {
+        xuanyu::ast::Stmt::Expr(expr_stmt) => {
+            update_expr_function_names(&mut expr_stmt.expr, module_name, func_names);
+        }
+        xuanyu::ast::Stmt::Let(let_stmt) => {
+            if let Some(init) = &mut let_stmt.initializer {
+                update_expr_function_names(init, module_name, func_names);
+            }
+        }
+        xuanyu::ast::Stmt::Return(ret_stmt) => {
+            if let Some(value) = &mut ret_stmt.value {
+                update_expr_function_names(value, module_name, func_names);
+            }
+        }
+        xuanyu::ast::Stmt::If(if_stmt) => {
+            for branch in &mut if_stmt.branches {
+                update_expr_function_names(&mut branch.condition, module_name, func_names);
+                update_stmt_function_names(&mut *branch.body, module_name, func_names);
+            }
+            if let Some(else_branch) = &mut if_stmt.else_branch {
+                update_stmt_function_names(else_branch, module_name, func_names);
+            }
+        }
+        xuanyu::ast::Stmt::Loop(loop_stmt) => {
+            if let Some(condition) = &mut loop_stmt.condition {
+                update_expr_function_names(condition, module_name, func_names);
+            }
+            update_stmt_function_names(&mut *loop_stmt.body, module_name, func_names);
+        }
+        xuanyu::ast::Stmt::Block(block_stmt) => {
+            for stmt in &mut block_stmt.statements {
+                update_stmt_function_names(stmt, module_name, func_names);
+            }
+        }
+        xuanyu::ast::Stmt::Assignment(assign_stmt) => {
+            update_expr_function_names(&mut assign_stmt.value, module_name, func_names);
+        }
+        _ => {}
+    }
+}
+
 fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
     // 如果是纯 IR 模式，不输出调试信息
     if mode != RunMode::IrPure {
@@ -409,40 +525,90 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
 
     // 将所有模块合并为一个模块，然后一次性生成 IR
     // 这样可以避免重复的运行时声明和外部函数声明
-    let mut merged_module = modules[0].module.clone();
-    for module in &modules[1..] {
-        // 合并函数（去重：按函数名去重）
-        for func in &module.module.functions {
-            if !merged_module.functions.iter().any(|f| f.name == func.name) {
-                merged_module.functions.push(func.clone());
+    
+    // 首先，为每个模块的所有函数调用添加模块名前缀
+    let mut updated_modules: Vec<(String, xuanyu::ast::Module)> = Vec::new();
+    
+    for module in &modules {
+        let module_name = module.path.file_stem().unwrap().to_string_lossy().to_string();
+        let mut updated_module = module.module.clone();
+        
+        // 收集当前模块中的函数名
+        let current_module_func_names: Vec<String> = updated_module.functions
+            .iter()
+            .filter(|f| f.name != "主" && f.name != "主函数")
+            .map(|f| f.name.clone())
+            .collect();
+        
+        // 更新当前模块中的所有函数调用：
+        // 1. 更新对当前模块内部函数的调用（添加当前模块前缀）
+        // 2. 更新对其他模块函数的调用（添加其他模块前缀）
+        for func in updated_module.functions.iter_mut() {
+            // 更新对当前模块内部函数的调用
+            for stmt in &mut func.body.statements {
+                update_stmt_function_names(stmt, &module_name, &current_module_func_names);
+            }
+            // 更新对其他模块函数的调用
+            for other_module in &modules {
+                if other_module.path != module.path {
+                    let other_module_name = other_module.path.file_stem().unwrap().to_string_lossy().to_string();
+                    let other_func_names: Vec<String> = other_module.module.functions
+                        .iter()
+                        .filter(|f| f.name != "主" && f.name != "主函数")
+                        .map(|f| f.name.clone())
+                        .collect();
+                    for stmt in &mut func.body.statements {
+                        update_stmt_function_names(stmt, &other_module_name, &other_func_names);
+                    }
+                }
             }
         }
+        
+        // 为当前模块的函数添加模块名前缀
+        for func in updated_module.functions.iter_mut() {
+            if func.name != "主" && func.name != "主函数" {
+                func.name = format!("{}::{}", module_name, func.name);
+            }
+        }
+        
+        updated_modules.push((module_name, updated_module));
+    }
+    
+    // 合并所有更新后的模块
+    let mut merged_module = updated_modules[0].1.clone();
+    
+    // 合并其他模块的内容
+    for (_, module) in &updated_modules[1..] {
+        // 合并函数
+        for func in &module.functions {
+            merged_module.functions.push(func.clone());
+        }
         // 合并结构体（去重）
-        for s in &module.module.structs {
+        for s in &module.structs {
             if !merged_module.structs.iter().any(|f| f.name == s.name) {
                 merged_module.structs.push(s.clone());
             }
         }
         // 合并枚举（去重）
-        for e in &module.module.enums {
+        for e in &module.enums {
             if !merged_module.enums.iter().any(|f| f.name == e.name) {
                 merged_module.enums.push(e.clone());
             }
         }
         // 合并外部函数声明（去重：按函数名去重）
-        for ext in &module.module.extern_functions {
+        for ext in &module.extern_functions {
             if !merged_module.extern_functions.iter().any(|e| e.name == ext.name) {
                 merged_module.extern_functions.push(ext.clone());
             }
         }
         // 合并常量（去重）
-        for c in &module.module.constants {
+        for c in &module.constants {
             if !merged_module.constants.iter().any(|f| f.name == c.name) {
                 merged_module.constants.push(c.clone());
             }
         }
         // 合并导入（去重）
-        for imp in &module.module.imports {
+        for imp in &module.imports {
             if !merged_module.imports.iter().any(|i| i.module_path == imp.module_path) {
                 merged_module.imports.push(imp.clone());
             }
@@ -471,7 +637,8 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
     }
 
     // 一次性生成合并后的 IR
-    let combined_ir = xuanyu::generate_ir(&merged_module)
+    // 使用主模块名作为模块名前缀，确保生成的函数名唯一
+    let combined_ir = xuanyu::generate_ir_with_module_name(&merged_module, module_name)
         .map_err(|e| format!("代码生成错误: {}", e.message))?;
 
     if mode != RunMode::IrPure {
@@ -487,8 +654,12 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
             println!("\n编译成功!");
         }
         RunMode::IrPure => {
-            // 只输出纯 IR，没有其他信息
             println!("{}", combined_ir);
+        }
+        RunMode::IrFile(filepath) => {
+            fs::write(&filepath, &combined_ir)
+                .map_err(|e| format!("无法写入 IR 文件: {}", e))?;
+            println!("IR 已写入: {}", filepath);
         }
         RunMode::Build | RunMode::Run => {
             // 保存 IR 到临时文件 - 使用唯一名称

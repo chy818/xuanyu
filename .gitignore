@@ -48,6 +48,10 @@ output/
 # Trae IDE 配置
 .trae/
 
+# claude 配置
+.claude/
+
+
 # xy 编译器输出
 *.ir
 
@@ -59,3 +63,4 @@ xuanyu_ir_*.ll
 
 # 意外重定向文件
 $null
+

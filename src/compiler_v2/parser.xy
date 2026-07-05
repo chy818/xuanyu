@@ -1472,7 +1472,7 @@
 /**
  * 同步到函数开始
  */
-函数 parser同步到函数(p: Parser): 无返回 {
+函数 parser同步到函数(p: Parser): Parser {
     定义 可变 tok: Token
     tok = parserPeekToken(p)
 
@@ -1480,6 +1480,8 @@
         parserConsume(p)
         tok = parserPeekToken(p)
     }
+
+    返回 p
 }
 
 /**
@@ -1823,35 +1825,6 @@
     打印(tokenValue)
 
     返回 inserted
-}
-
-/**
- * 同步到函数边界
- */
-函数 parser同步到函数(p: Parser): Parser {
-    定义 可变 depth: 整数
-    depth = 0
-
-    当 p.当前位置 < p.源码长度 则 {
-        定义 可变 tok: Token
-        tok = parserPeekToken(p)
-
-        若 tok.值 == "函数" && depth == 0 则 {
-            返回 p
-        }
-
-        若 tok.值 == "{" 则 {
-            depth = depth + 1
-        } 否则 {
-            若 tok.值 == "}" 则 {
-                depth = depth - 1
-            }
-        }
-
-        parserConsume(p)
-    }
-
-    返回 p
 }
 
 /**

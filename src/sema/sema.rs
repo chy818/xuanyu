@@ -686,6 +686,10 @@ impl SemanticAnalyzer {
                 // 分析抛出异常
                 self.analyze_throw_statement(throw_stmt)
             }
+            Stmt::Fn(_) => {
+                // 函数定义已在 parse_module 中处理
+                Ok(Type::Void)
+            }
         }
     }
 
@@ -1409,8 +1413,9 @@ impl SemanticAnalyzer {
         let right_type = self.analyze_expression(&binary.right)?;
 
         match binary.op {
-            // 算术运算
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem => {
+            // 算术运算和复合赋值运算
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem |
+            BinaryOp::AddAssign | BinaryOp::SubAssign | BinaryOp::MulAssign | BinaryOp::DivAssign | BinaryOp::RemAssign => {
                 // 左右类型必须相同且为数值类型
                 // 注意：XY编译器自展时会遇到 Unknown 类型（用于前向引用）
                 if left_type == Type::Unknown || right_type == Type::Unknown {

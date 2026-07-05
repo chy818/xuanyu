@@ -499,20 +499,33 @@ impl Lexer {
             // 运算符和分隔符
             '+' => {
                 self.advance();
-                Token::new(TokenType::加, "+".to_string(), self.make_span(start_line, start_column))
+                if self.current_char() == Some('=') {
+                    self.advance();
+                    Token::new(TokenType::加等于, "+=".to_string(), self.make_span(start_line, start_column))
+                } else {
+                    Token::new(TokenType::加, "+".to_string(), self.make_span(start_line, start_column))
+                }
             }
             '-' => {
                 self.advance();
                 if self.current_char() == Some('>') {
                     self.advance();
                     Token::new(TokenType::箭头, "->".to_string(), self.make_span(start_line, start_column))
+                } else if self.current_char() == Some('=') {
+                    self.advance();
+                    Token::new(TokenType::减等于, "-=".to_string(), self.make_span(start_line, start_column))
                 } else {
                     Token::new(TokenType::减, "-".to_string(), self.make_span(start_line, start_column))
                 }
             }
             '*' => {
                 self.advance();
-                Token::new(TokenType::乘, "*".to_string(), self.make_span(start_line, start_column))
+                if self.current_char() == Some('=') {
+                    self.advance();
+                    Token::new(TokenType::乘等于, "*=".to_string(), self.make_span(start_line, start_column))
+                } else {
+                    Token::new(TokenType::乘, "*".to_string(), self.make_span(start_line, start_column))
+                }
             }
             '/' => {
                 self.advance();
@@ -536,7 +549,12 @@ impl Lexer {
             }
             '%' => {
                 self.advance();
-                Token::new(TokenType::取余, "%".to_string(), self.make_span(start_line, start_column))
+                if self.current_char() == Some('=') {
+                    self.advance();
+                    Token::new(TokenType::取余等于, "%=".to_string(), self.make_span(start_line, start_column))
+                } else {
+                    Token::new(TokenType::取余, "%".to_string(), self.make_span(start_line, start_column))
+                }
             }
             '#' => {
                 self.advance();

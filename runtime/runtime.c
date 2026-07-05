@@ -231,6 +231,15 @@ int64_t rt_char_to_code(void* ch_ptr) {
     return (int64_t)(unsigned char)ch;
 }
 
+/* Code to character conversion */
+void* rt_code_to_char(int64_t code) {
+    char* result = (char*)malloc(2);
+    if (!result) return NULL;
+    result[0] = (char)(code & 0xFF);
+    result[1] = '\0';
+    return result;
+}
+
 /* Error function */
 void rt_error(void* msg) {
     if (msg) {

@@ -179,6 +179,13 @@ pub enum BinaryOp {
     /// 赋值运算符
     Assign,     // 赋值 (=)
     
+    /// 复合赋值运算符
+    AddAssign,  // 加等于 (+=)
+    SubAssign,  // 减等于 (-=)
+    MulAssign,  // 乘等于 (*=)
+    DivAssign,  // 除等于 (/=)
+    RemAssign,  // 取余等于 (%=)
+    
     /// 算术运算符
     Add,       // 加 (+)
     Sub,       // 减 (-)
@@ -696,6 +703,12 @@ pub enum Stmt {
      * 例如: 抛出 异常("错误信息")
      */
     Throw(ThrowStmt),
+    
+    /**
+     * 函数定义语句
+     * 例如: 函数 主(): 整数 { 返回 0 }
+     */
+    Fn(Function),
 }
 
 impl ASTNode for Stmt {
@@ -717,6 +730,7 @@ impl ASTNode for Stmt {
             Stmt::Match(e) => e.span.clone(),
             Stmt::Try(e) => e.span.clone(),
             Stmt::Throw(e) => e.span.clone(),
+            Stmt::Fn(e) => e.span.clone(),
         }
     }
 }

@@ -240,8 +240,9 @@ impl TypeInferenceEngine {
         let right_type = self.infer_expression_type(right);
         
         match op {
-            // 算术运算符: 返回操作数类型 (或提升后的类型)
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem => {
+            // 算术运算符和复合赋值运算符: 返回操作数类型 (或提升后的类型)
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem |
+            BinaryOp::AddAssign | BinaryOp::SubAssign | BinaryOp::MulAssign | BinaryOp::DivAssign | BinaryOp::RemAssign => {
                 self.infer_arithmetic_result_type(&left_type, &right_type)
             }
             
@@ -651,6 +652,7 @@ impl Default for TypeInferenceEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Span;
 
     #[test]
     fn test_literal_inference() {
