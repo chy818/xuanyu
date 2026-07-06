@@ -151,6 +151,7 @@ impl ModuleResolver {
     /**
      * 查找模块文件（向后兼容，无父路径）
      */
+    #[allow(dead_code)]
     fn find_module_file(&self, module_path: &str) -> Result<PathBuf, CompilerError> {
         self.find_module_file_with_parent(module_path, None)
     }
@@ -295,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_module_resolver() {
-        let mut resolver = ModuleResolver::new();
+        let _resolver = ModuleResolver::new();
         
         // 测试模块解析
         // 这里需要实际的测试文件，暂时跳过
@@ -303,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_topological_sort() {
-        let mut resolver = ModuleResolver::new();
+        let _resolver = ModuleResolver::new();
         
         // 测试拓扑排序
         // 这里需要实际的模块依赖，暂时跳过

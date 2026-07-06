@@ -292,6 +292,7 @@ pub struct FunctionInliner {
  * 函数信息
  */
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct FunctionInfo {
     /// 函数名
     name: String,

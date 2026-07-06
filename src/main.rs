@@ -407,7 +407,7 @@ fn update_expr_function_names(expr: &mut Expr, module_name: &str, func_names: &[
         Expr::Call(call) => {
             if let Expr::Identifier(ident) = &mut *call.function {
                 let original_name = ident.name.clone();
-                if func_names.contains(&original_name) && original_name != "主" && original_name != "主函数" {
+                if func_names.contains(&original_name) && original_name != "主" && original_name != "主函数" && original_name != "main" {
                     ident.name = format!("{}::{}", module_name, original_name);
                 }
             }
@@ -536,7 +536,7 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
         // 收集当前模块中的函数名
         let current_module_func_names: Vec<String> = updated_module.functions
             .iter()
-            .filter(|f| f.name != "主" && f.name != "主函数")
+            .filter(|f| f.name != "主" && f.name != "主函数" && f.name != "main")
             .map(|f| f.name.clone())
             .collect();
         
@@ -554,7 +554,7 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
                     let other_module_name = other_module.path.file_stem().unwrap().to_string_lossy().to_string();
                     let other_func_names: Vec<String> = other_module.module.functions
                         .iter()
-                        .filter(|f| f.name != "主" && f.name != "主函数")
+                        .filter(|f| f.name != "主" && f.name != "主函数" && f.name != "main")
                         .map(|f| f.name.clone())
                         .collect();
                     for stmt in &mut func.body.statements {
@@ -564,9 +564,9 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
             }
         }
         
-        // 为当前模块的函数添加模块名前缀
+        // 为当前模块的函数添加模块名前缀（主函数和英文 main 别名除外）
         for func in updated_module.functions.iter_mut() {
-            if func.name != "主" && func.name != "主函数" {
+            if func.name != "主" && func.name != "主函数" && func.name != "main" {
                 func.name = format!("{}::{}", module_name, func.name);
             }
         }

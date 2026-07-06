@@ -680,49 +680,35 @@
 
         若 tok.值 == "定义" 则 {
             stmt = parseLetStatement(p)
-            node.children = stmt  // 添加语句到块
+            列表追加(node.children, stmt)
+        } 否则 若 tok.值 == "返回" 则 {
+            stmt = parseReturnStatement(p)
+            列表追加(node.children, stmt)
+        } 否则 若 tok.值 == "若" 则 {
+            stmt = parseIfStatement(p)
+            列表追加(node.children, stmt)
+        } 否则 若 tok.值 == "当" 则 {
+            stmt = parseWhileStatement(p)
+            列表追加(node.children, stmt)
+        } 否则 若 tok.值 == "循环" 则 {
+            stmt = parseForStatement(p)
+            列表追加(node.children, stmt)
+        } 否则 若 tok.值 == "匹配" 则 {
+            stmt = parseMatchStatement(p)
+            列表追加(node.children, stmt)
+        } 否则 若 tok.值 == "退出" 则 {
+            stmt = parseBreakStatement(p)
+            列表追加(node.children, stmt)
+        } 否则 若 tok.值 == "跳过" 则 {
+            stmt = parseContinueStatement(p)
+            列表追加(node.children, stmt)
         } 否则 {
-            若 tok.值 == "返回" 则 {
-                stmt = parseReturnStatement(p)
-                node.children = stmt  // 添加语句到块
-            } 否则 {
-                若 tok.值 == "若" 则 {
-                    stmt = parseIfStatement(p)
-                    node.children = stmt  // 添加语句到块
-                } 否则 {
-                    若 tok.值 == "当" 则 {
-                        stmt = parseWhileStatement(p)
-                        node.children = stmt  // 添加语句到块
-                    } 否则 {
-                        若 tok.值 == "循环" 则 {
-                            stmt = parseForStatement(p)
-                            node.children = stmt  // 添加语句到块
-                        } 否则 {
-                            若 tok.值 == "匹配" 则 {
-                                stmt = parseMatchStatement(p)
-                                node.children = stmt  // 添加语句到块
-                            } 否则 {
-                                若 tok.值 == "退出" 则 {
-                                    stmt = parseBreakStatement(p)
-                                    node.children = stmt
-                                }
-                            } 否则 {
-                                若 tok.值 == "跳过" 则 {
-                                    stmt = parseContinueStatement(p)
-                                    node.children = stmt
-                                } 否则 {
-                                    stmt = parseAssignmentOrExpression(p)
-                                    node.children = stmt  // 添加语句到块
-                                    // 消费分号
-                                    tok = parserPeekToken(p)
-                                    若 tok.值 == ";" 则 {
-                                        parserConsume(p)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            stmt = parseAssignmentOrExpression(p)
+            列表追加(node.children, stmt)
+            // 消费分号
+            tok = parserPeekToken(p)
+            若 tok.值 == ";" 则 {
+                parserConsume(p)
             }
         }
 
@@ -1150,15 +1136,13 @@
         若 tok.值 == "函数" 则 {
             定义 可变 funcNode: AST节点
             funcNode = parseFunction(p)
-            node.children = funcNode  // 添加函数到模块
+            列表追加(node.children, funcNode)
+        } 否则 若 tok.值 == "引入" 则 {
+            定义 可变 importNode: AST节点
+            importNode = parseImportStatement(p)
+            列表追加(node.children, importNode)
         } 否则 {
-            若 tok.值 == "引入" 则 {
-                定义 可变 importNode: AST节点
-                importNode = parseImportStatement(p)
-                node.children = importNode  // 添加导入到模块
-            } 否则 {
-                parserConsume(p)
-            }
+            parserConsume(p)
         }
         tok = parserPeekToken(p)
     }
@@ -2029,39 +2013,29 @@
             定义 可变 funcNode: AST节点
             funcNode = parseFunction(p)
             progNode.children.追加(funcNode)
+        } 否则 若 tok.值 == "结构体" || tok.值 == "struct" 则 {
+            定义 可变 structNode: AST节点
+            structNode = parseStructDefinition(p)
+            progNode.children.追加(structNode)
+        } 否则 若 tok.值 == "枚举" || tok.值 == "enum" 则 {
+            定义 可变 enumNode: AST节点
+            enumNode = parseEnumDefinition(p)
+            progNode.children.追加(enumNode)
+        } 否则 若 tok.值 == "引入" || tok.值 == "import" 则 {
+            定义 可变 importNode: AST节点
+            importNode = parseImportStatement(p)
+            progNode.children.追加(importNode)
+        } 否则 若 tok.值 == "模块" || tok.值 == "module" 则 {
+            定义 可变 moduleNode: AST节点
+            moduleNode = parseModuleDefinition(p)
+            progNode.children.追加(moduleNode)
+        } 否则 若 tok.值 == "外部" || tok.值 == "extern" 则 {
+            定义 可变 externalNode: AST节点
+            externalNode = parseExternalDeclaration(p)
+            progNode.children.追加(externalNode)
         } 否则 {
-            若 tok.值 == "结构体" || tok.值 == "struct" 则 {
-                定义 可变 structNode: AST节点
-                structNode = parseStructDefinition(p)
-                progNode.children.追加(structNode)
-            } 否则 {
-                若 tok.值 == "枚举" || tok.值 == "enum" 则 {
-                    定义 可变 enumNode: AST节点
-                    enumNode = parseEnumDefinition(p)
-                    progNode.children.追加(enumNode)
-                } 否则 {
-                    若 tok.值 == "引入" || tok.值 == "import" 则 {
-                        定义 可变 importNode: AST节点
-                        importNode = parseImportStatement(p)
-                        progNode.children.追加(importNode)
-                    } 否则 {
-                        若 tok.值 == "模块" || tok.值 == "module" 则 {
-                            定义 可变 moduleNode: AST节点
-                            moduleNode = parseModuleDefinition(p)
-                            progNode.children.追加(moduleNode)
-                        } 否则 {
-                            若 tok.值 == "外部" || tok.值 == "extern" 则 {
-                                定义 可变 externalNode: AST节点
-                                externalNode = parseExternalDeclaration(p)
-                                progNode.children.追加(externalNode)
-                            } 否则 {
-                                /* 跳过未知 token */
-                                parserConsume(p)
-                            }
-                        }
-                    }
-                }
-            }
+            /* 跳过未知 token */
+            parserConsume(p)
         }
         tok = parserPeekToken(p)
     }

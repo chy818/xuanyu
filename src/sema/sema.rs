@@ -85,6 +85,7 @@ impl Scope {
  * 存储函数的参数类型和返回类型
  */
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct FunctionSignature {
     /// 参数类型列表
     param_types: Vec<Type>,
@@ -1680,6 +1681,7 @@ impl SemanticAnalyzer {
     /**
      * 验证成员访问表达式
      */
+    #[allow(dead_code)]
     fn analyze_member_expression(&mut self, member: &MemberAccessExpr) -> Result<Type, Vec<TypeError>> {
         // 分析对象表达式
         let object_type = self.analyze_expression(&member.object)?;

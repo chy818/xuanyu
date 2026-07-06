@@ -1,3 +1,7 @@
+/* 抑制 MSVC 弃用警告 */
+#define _CRT_SECURE_NO_WARNINGS
+#define _CRT_NONSTDC_NO_DEPRECATE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -224,11 +228,11 @@ int is_alnum(void* ch_ptr) {
     return (is_alpha(ch_ptr) || is_digit(ch_ptr)) ? 1 : 0;
 }
 
-/* Character to code conversion */
+/* Character to code conversion - expects a string pointer */
 int64_t rt_char_to_code(void* ch_ptr) {
     if (!ch_ptr) return 0;
-    char ch = *((char*)ch_ptr);
-    return (int64_t)(unsigned char)ch;
+    char* s = (char*)ch_ptr;
+    return (int64_t)(unsigned char)s[0];
 }
 
 /* Code to character conversion */
@@ -355,15 +359,15 @@ int64_t str_to_int(void* str) {
 /* File functions */
 void* file_read(void* path) {
     if (!path) return NULL;
-    FILE* f = fopen((char*)path, "r");
+    FILE* f = fopen((char*)path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
     char* result = (char*)malloc(size + 1);
     if (!result) { fclose(f); return NULL; }
-    fread(result, 1, size, f);
-    result[size] = '\0';
+    size_t read = fread(result, 1, size, f);
+    result[read] = '\0';
     fclose(f);
     return result;
 }

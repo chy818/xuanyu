@@ -51,6 +51,7 @@ impl Parser {
     /**
      * 向前看指定关键字
      */
+    #[allow(dead_code)]
     fn peek_keyword(&self, keyword: &Keyword) -> bool {
         if let Some(token) = self.peek(1) {
             if let TokenType::Keyword(k) = &token.token_type {

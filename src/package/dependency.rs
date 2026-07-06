@@ -411,6 +411,7 @@ impl std::error::Error for DependencyError {}
  * 依赖图
  */
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct DependencyGraph {
     /// 节点
     pub nodes: HashMap<String, DependencyNode>,
@@ -422,6 +423,7 @@ pub struct DependencyGraph {
  * 依赖节点
  */
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DependencyNode {
     /// 依赖名称
     pub name: String,
@@ -435,6 +437,7 @@ pub struct DependencyNode {
     pub out_degree: usize,
 }
 
+#[allow(dead_code)]
 impl DependencyGraph {
     /**
      * 创建空图

@@ -85,7 +85,8 @@ pub struct Compiler {
     macro_expander: MacroExpander,
     /// 全局宏定义
     global_macros: HashMap<String, MacroDefinition>,
-    /// 增量编译器
+    /// 增量编译器（TODO: 尚未完整集成到主编译流程）
+    #[allow(dead_code)]
     incremental: incremental::IncrementalCompiler,
 }
 

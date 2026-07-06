@@ -332,16 +332,23 @@
 /**
  * 初始化词法分析器
  */
-函数 lexerInit(源码: 文本): Lexer {
+函数 lexerInit(源码: 文本, 长度: 整数): Lexer {
     定义 可变 lex: Lexer
     lex.源码 = 源码
     lex.位置 = 0
-    lex.长度 = 文本长度(源码)
+    lex.长度 = 长度
+    打印("DEBUG lexerInit: 源码长度=")
+    打印整数(lex.长度)
+    打印("\n")
     lex.行号 = 1
     lex.列号 = 1
     lex.开始位置 = 0
     lex.当前位置 = 0
+    打印("DEBUG lexerInit: 调用获取字符\n")
     lex.当前字符 = 获取字符(lex)
+    打印("DEBUG lexerInit: 当前字符=")
+    打印整数(lex.当前字符)
+    打印("\n")
     返回 lex
 }
 
@@ -1254,7 +1261,7 @@
     打印("=== 词法分析 ===")
 
     定义 可变 lex: Lexer
-    lex = lexerInit(源码)
+    lex = lexerInit(源码, 文本长度(源码))
 
     定义 可变 count: 整数
     count = 0
@@ -1305,7 +1312,7 @@
  */
 函数 tokenize(源码: 文本): 列表 {
     定义 可变 lex: Lexer
-    lex = lexerInit(源码)
+    lex = lexerInit(源码, 文本长度(源码))
     打印("DEBUG tokenize: lexerInit 完成\n")
 
     定义 可变 tokens: 列表
