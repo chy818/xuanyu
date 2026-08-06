@@ -911,30 +911,45 @@ impl CodeGenerator {
             signature_params.push(format!("{}* sret({}) %agg.result", return_info.2, return_info.2));
         }
         // 为每个参数添加明确的名称，避免 LLVM 自动编号导致的冲突
+        let param_is_struct: Vec<bool> = param_types.iter()
+            .map(|t| t.starts_with("%struct.")).collect();
+
         for (i, (param, param_type)) in func.params.iter().zip(param_types.iter()).enumerate() {
             let param_name = Self::sanitize_identifier(&param.name);
-            // 使用明确的参数名称，格式为 %arg_N_param_name
-            signature_params.push(format!("{} %arg_{}_{}", param_type, i, param_name));
+            if param_type.starts_with("%struct.") {
+                // 结构体参数：传指针而非传值，使函数对 struct 的修改对调用者可见
+                signature_params.push(format!("{}* %arg_{}_{}", param_type, i, param_name));
+            } else {
+                signature_params.push(format!("{} %arg_{}_{}", param_type, i, param_name));
+            }
         }
         let params_str = signature_params.join(", ");
         self.emit(&format!("define {} @{}({}) {{\n", return_type, func_name, params_str));
 
         // 处理函数参数
-        // 使用命名参数，避免与 LLVM 自动编号冲突
         for (i, param) in func.params.iter().enumerate() {
             let safe_name = Self::sanitize_identifier(&param.name);
             let param_type = self.translate_type(&param.param_type);
-            let alloca = self.new_label(&safe_name);
-            let llvm_param_name = format!("arg_{}_{}", i, safe_name);
+            let param_is_ptr = param_is_struct[i];
 
-            self.emit(&format!("    %{} = alloca {}, align 8", alloca, param_type));
-            self.emit(&format!("    store {} %{}, {}* %{}", param_type, llvm_param_name, param_type, alloca));
+            if param_is_ptr {
+                // 结构体参数以指针传入，直接使用该指针作为变量地址
+                // 无需 alloca + store，指针本身就是变量的"地址"
+                let orig_name = param.name.clone();
+                let ptr_name = format!("arg_{}_{}", i, safe_name);
+                self.variables.insert(orig_name.clone(), ptr_name);
+                self.variable_types.insert(orig_name, param_type);
+            } else {
+                let alloca = self.new_label(&safe_name);
+                let llvm_param_name = format!("arg_{}_{}", i, safe_name);
 
-            // 用原始名称记录变量（用于代码中的变量查找）
-            let orig_name = param.name.clone();
-            self.variables.insert(orig_name.clone(), alloca);
-            // 统一使用值类型（不加 * 后缀），与 generate_let_stmt 保持一致
-            self.variable_types.insert(orig_name, param_type);
+                self.emit(&format!("    %{} = alloca {}, align 8", alloca, param_type));
+                self.emit(&format!("    store {} %{}, {}* %{}", param_type, llvm_param_name, param_type, alloca));
+
+                let orig_name = param.name.clone();
+                self.variables.insert(orig_name.clone(), alloca);
+                self.variable_types.insert(orig_name, param_type);
+            }
         }
         
         // 记录生成函数体前的 IR 长度
@@ -2875,6 +2890,46 @@ impl CodeGenerator {
                     (full_func_name, false, false)
                 }
             }
+            Expr::MemberAccess(member) => {
+                // 处理 XY 的方法调用语法：object.method(args)
+                let obj_type = self.infer_expression_type(&member.object);
+                if obj_type == "i8*" {
+                    // 列表方法调用：直接生成对应的 C runtime 调用
+                    let list_val = self.generate_expression(&member.object)?;
+                    let mut all_args = vec![list_val];
+                    for arg in &call.arguments {
+                        all_args.push(self.generate_expression(arg)?);
+                    }
+                    let result = self.new_label("call");
+                    match member.member.as_str() {
+                        "追加" | "append" => {
+                            if all_args.len() >= 2 {
+                                let a1_type = self.variable_types.get(&all_args[1]).cloned().unwrap_or("i8*".to_string());
+                                let a1 = if a1_type != "i8*" { self.generate_type_conversion(&all_args[1], &a1_type, "i8*") } else { all_args[1].clone() };
+                                self.emit(&format!("    call void @rt_list_append(i8* %{}, i8* %{})", all_args[0], a1));
+                            }
+                            return Ok(result);
+                        }
+                        "长度" | "length" => {
+                            self.emit(&format!("    %{} = call i64 @rt_list_len(i8* %{})", result, all_args[0]));
+                            self.variable_types.insert(result.clone(), "i64".to_string());
+                            return Ok(result);
+                        }
+                        "获取" | "get" => {
+                            if all_args.len() >= 2 {
+                                let a1_type = self.variable_types.get(&all_args[1]).cloned().unwrap_or("i64".to_string());
+                                let a1 = if a1_type != "i64" { self.generate_type_conversion(&all_args[1], &a1_type, "i64") } else { all_args[1].clone() };
+                                self.emit(&format!("    %{} = call i8* @rt_list_get(i8* %{}, i64 %{})", result, all_args[0], a1));
+                                self.variable_types.insert(result.clone(), "i8*".to_string());
+                            }
+                            return Ok(result);
+                        }
+                        _ => {}
+                    }
+                }
+                let val = self.generate_expression(&call.function)?;
+                (val, true, false)
+            }
             _ => {
                 let val = self.generate_expression(&call.function)?;
                 (val, true, false)
@@ -3156,13 +3211,36 @@ impl CodeGenerator {
                     "i64".to_string()
                 };
 
-                // 获取实际参数类型：
-                // 优先从 generate_expression 返回值的 variable_types 中查找
+                // 对于 struct 参数，传递指针而非值
+                if expected_type.starts_with("%struct.") {
+                    // 查找原始 alloca 指针（通过变量名）
+                    if let Expr::Identifier(ident) = &call.arguments[i] {
+                        if let Some(alloca) = self.variables.get(&ident.name) {
+                            converted_args.push(format!("{}* %{}", expected_type, alloca));
+                            continue;
+                        }
+                    }
+                    // 检查 arg 的实际类型：如果已经是指针，直接使用
+                    let actual_type = self.variable_types.get(arg).cloned()
+                        .unwrap_or_else(|| self.infer_arg_type(&call.arguments[i]));
+                    if actual_type.ends_with('*') {
+                        // arg 已经是指针，直接使用
+                        converted_args.push(format!("{}* %{}", expected_type, arg));
+                        continue;
+                    }
+                    // 否则需要 alloca + store 获取指针
+                    let tmp = self.new_label("arg_ptr");
+                    self.emit(&format!("    %{} = alloca {}, align 8", tmp, expected_type));
+                    self.emit(&format!("    store {} %{}, ptr %{}", expected_type, arg, tmp));
+                    converted_args.push(format!("{}* %{}", expected_type, tmp));
+                    continue;
+                }
+
+                // 获取实际参数类型
                 let actual_type = self.variable_types.get(arg)
                     .cloned()
                     .unwrap_or_else(|| self.infer_arg_type(&call.arguments[i]));
 
-                // 如果类型不匹配，生成转换代码
                 if actual_type != expected_type {
                     let converted_val = self.generate_type_conversion(arg, &actual_type, &expected_type);
                     converted_args.push(format!("{} %{}", expected_type, converted_val));
