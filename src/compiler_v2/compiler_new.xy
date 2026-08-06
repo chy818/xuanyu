@@ -72,11 +72,13 @@
 
 函数 执行语法分析(tokens: 列表, 源码: 文本): AST节点 {
     打印("=== 语法分析 ===")
+    打印("DEBUG 执行语法分析: 调用 parser分析Tokens")
     定义 可变 ast: AST节点
     ast = parser分析Tokens(tokens, 源码)
     打印("语法分析完成，共 ")
     打印整数(列表长度(ast.children))
     打印(" 个顶层声明")
+    打印换行()
     打印换行()
     返回 ast
 }
@@ -132,6 +134,11 @@
     tokens = 执行词法分析(源码)
 
     // 阶段2: 语法分析
+    打印("DEBUG: tokens list has ")
+    打印整数(列表长度(tokens))
+    打印(" elements, ptr=")
+    打印(tokens)
+    打印("\n")
     打印("DEBUG: 准备调用执行语法分析\n")
     定义 可变 ast: AST节点
     ast = 执行语法分析(tokens, 源码)

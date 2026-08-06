@@ -231,8 +231,18 @@ int is_alnum(void* ch_ptr) {
 /* Character to code conversion - expects a string pointer */
 int64_t rt_char_to_code(void* ch_ptr) {
     if (!ch_ptr) return 0;
-    char* s = (char*)ch_ptr;
-    return (int64_t)(unsigned char)s[0];
+    unsigned char* s = (unsigned char*)ch_ptr;
+    // UTF-8 解码为完整 Unicode 码点
+    if ((s[0] & 0x80) == 0) {
+        return (int64_t)s[0];  // ASCII
+    } else if ((s[0] & 0xE0) == 0xC0) {
+        return (int64_t)(((s[0] & 0x1F) << 6) | (s[1] & 0x3F));
+    } else if ((s[0] & 0xF0) == 0xE0) {
+        return (int64_t)(((s[0] & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F));
+    } else if ((s[0] & 0xF8) == 0xF0) {
+        return (int64_t)(((s[0] & 0x07) << 18) | ((s[1] & 0x3F) << 12) | ((s[2] & 0x3F) << 6) | (s[3] & 0x3F));
+    }
+    return (int64_t)s[0];
 }
 
 /* Code to character conversion */
@@ -269,6 +279,13 @@ int64_t rt_string_len(void* str) {
 
 /* UTF-8 helper functions */
 int64_t rt_utf8_byte_length(int64_t ch) {
+    // 如果值是 Unicode 码点（> 255），按码点范围计算 UTF-8 字节数
+    if (ch > 255) {
+        if (ch < 0x800) return 2;
+        if (ch < 0x10000) return 3;
+        return 4;
+    }
+    // 否则按首字节判断
     unsigned char c = (unsigned char)ch;
     if ((c & 0x80) == 0) return 1;
     if ((c & 0xE0) == 0xC0) return 2;
@@ -278,10 +295,11 @@ int64_t rt_utf8_byte_length(int64_t ch) {
 }
 
 int64_t rt_is_utf8_leader(int64_t ch) {
+    if (ch > 255) return 1;  // Unicode 码点始终是有效的字符起始
     unsigned char c = (unsigned char)ch;
-    return ((c & 0x80) == 0) || 
-           ((c & 0xE0) == 0xC0) || 
-           ((c & 0xF0) == 0xE0) || 
+    return ((c & 0x80) == 0) ||
+           ((c & 0xE0) == 0xC0) ||
+           ((c & 0xF0) == 0xE0) ||
            ((c & 0xF8) == 0xF0);
 }
 
@@ -290,15 +308,32 @@ int64_t rt_is_utf8_continuation(int64_t ch) {
     return (c & 0xC0) == 0x80;
 }
 
-void* rt_string_char_at(void* str, int64_t index) {
+void* rt_string_char_at(void* str, int64_t byte_index) {
     if (!str) return NULL;
     char* s = (char*)str;
     int64_t len = strlen(s);
-    if (index < 0 || index >= len) return strdup("");
-    char* result = (char*)malloc(2);
+    if (byte_index < 0 || byte_index >= len) return strdup("");
+
+    // UTF-8 感知：返回完整的 Unicode 字符（1-4 字节）
+    unsigned char c = (unsigned char)s[byte_index];
+    int char_len = 1;
+    if ((c & 0x80) == 0) {
+        char_len = 1;
+    } else if ((c & 0xE0) == 0xC0) {
+        char_len = 2;
+    } else if ((c & 0xF0) == 0xE0) {
+        char_len = 3;
+    } else if ((c & 0xF8) == 0xF0) {
+        char_len = 4;
+    }
+
+    // 确保不超出字符串边界
+    if (byte_index + char_len > len) char_len = (int)(len - byte_index);
+
+    char* result = (char*)malloc(char_len + 1);
     if (!result) return NULL;
-    result[0] = s[index];
-    result[1] = '\0';
+    memcpy(result, s + byte_index, char_len);
+    result[char_len] = '\0';
     return result;
 }
 

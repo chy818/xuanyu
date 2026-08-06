@@ -3018,15 +3018,41 @@
     定义 可变 varName: 文本
     varName = varNode.name
 
-    /* 分配空间 */
+    /* 确定变量的 LLVM 分配大小（以 i64 为单位） */
+    定义 可变 slotCount: 整数
+    slotCount = 1  // 默认 1 个 i64 槽（8 字节）
+    定义 可变 varTypeTag: 文本
+    varTypeTag = varNode.value  // type annotation like "Token", "Lexer", "整数" etc
+
+    若 varTypeTag == "Token" 则 { slotCount = 6 }
+    否则 若 varTypeTag == "Lexer" 则 { slotCount = 10 }
+    否则 若 varTypeTag == "Sema" 则 { slotCount = 11 }
+    否则 若 varTypeTag == "Codegen" 则 { slotCount = 12 }
+    否则 若 varTypeTag == "Parser" 则 { slotCount = 9 }
+    否则 若 varTypeTag == "AST节点" 则 { slotCount = 7 }
+    否则 若 varTypeTag == "循环上下文" 则 { slotCount = 4 }
+    否则 若 varTypeTag == "循环状态" 则 { slotCount = 2 }
+
+    /* 分配所有槽位 */
     定义 可变 tmpPtr: 文本
     tmpPtr = varName + "_slot"
-    codegenEmit(cg, "  %" + tmpPtr + " = alloca i64")
+    定义 可变 i: 整数
+    i = 0
+    当 i < slotCount 则 {
+        定义 可变 slotName: 文本
+        若 i == 0 则 {
+            slotName = varName + "_slot"
+        } 否则 {
+            slotName = varName + "_slot_" + 整数转文本(i)
+        }
+        codegenEmit(cg, "  %" + slotName + " = alloca i64, align 8")
+        i = i + 1
+    }
 
-    /* 添加到变量映射 */
-    codegen添加变量(cg, varName, tmpPtr, "整数")
+    /* 只把第一个槽位加入变量映射（用于查找变量） */
+    codegen添加变量(cg, varName, tmpPtr, varTypeTag)
 
-    /* 初始化 */
+    /* 初始化（只对第一个槽位） */
     若 列表长度(varNode.children) > 0 则 {
         定义 可变 initNode: AST节点
         initNode = 列表获取(varNode.children, 0)
@@ -3037,28 +3063,179 @@
 }
 
 /**
+ * 获取结构体字段字节偏移和类型（用于 GEP 访问）
+ * 返回格式: "byte_offset|type"，如 "0|i64" 或 "" 表示未找到
+ */
+函数 codegen查找结构体字段(结构体名: 文本, 字段名: 文本): 文本 {
+    /* Token 结构体: 类型=i64(0), 值=i8*(8), 行号=i64(16), 列号=i64(24), 开始位置=i64(32), 结束位置=i64(40) */
+    若 结构体名 == "Token" 则 {
+        若 字段名 == "类型" 则 { 返回 "0|i64" }
+        若 字段名 == "值" 则 { 返回 "8|i8*" }
+        若 字段名 == "行号" 则 { 返回 "16|i64" }
+        若 字段名 == "列号" 则 { 返回 "24|i64" }
+        若 字段名 == "开始位置" 则 { 返回 "32|i64" }
+        若 字段名 == "结束位置" 则 { 返回 "40|i64" }
+    }
+    /* Lexer 结构体 */
+    若 结构体名 == "Lexer" 则 {
+        若 字段名 == "源码" 则 { 返回 "0|i8*" }
+        若 字段名 == "位置" 则 { 返回 "8|i64" }
+        若 字段名 == "长度" 则 { 返回 "16|i64" }
+        若 字段名 == "行号" 则 { 返回 "24|i64" }
+        若 字段名 == "列号" 则 { 返回 "32|i64" }
+        若 字段名 == "当前字符" 则 { 返回 "40|i64" }
+        若 字段名 == "开始位置" 则 { 返回 "48|i64" }
+        若 字段名 == "当前位置" 则 { 返回 "56|i64" }
+    }
+    /* AST节点 结构体 */
+    若 结构体名 == "AST节点" 则 {
+        若 字段名 == "id" 则 { 返回 "0|i64" }
+        若 字段名 == "kind" 则 { 返回 "8|i64" }
+        若 字段名 == "name" 则 { 返回 "16|i8*" }
+        若 字段名 == "value" 则 { 返回 "24|i8*" }
+        若 字段名 == "intValue" 则 { 返回 "32|i64" }
+        若 字段名 == "line" 则 { 返回 "40|i64" }
+        若 字段名 == "children" 则 { 返回 "48|i8*" }
+    }
+    若 结构体名 == "Codegen" 则 {
+        若 字段名 == "output" 则 { 返回 "24|i8*" }
+        若 字段名 == "indent" 则 { 返回 "32|i64" }
+    }
+    若 结构体名 == "Sema" 则 {
+        若 字段名 == "错误计数" 则 { 返回 "56|i64" }
+        若 字段名 == "警告计数" 则 { 返回 "64|i64" }
+    }
+    返回 ""
+}
+
+/**
  * 遍历赋值语句
  */
 函数 codegen遍历赋值语句(cg: Codegen, assignNode: AST节点): 无返回 {
     定义 可变 varName: 文本
     varName = assignNode.name
 
-    /* 查找变量 */
+    /* 检查是否是结构体字段赋值 (如 tok.类型 = 0)
+       通过硬编码的常见前缀进行匹配 */
+    定义 可变 isFieldAssign: 整数
+    isFieldAssign = 0
+    定义 可变 baseName: 文本
+    baseName = ""
+    定义 可变 fieldName: 文本
+    fieldName = ""
+
+    /* 常见的结构体变量名 + . + 字段名的模式匹配 */
+    若 文本长度(varName) > 2 则 {
+        定义 可变 ch1: 文本
+        ch1 = 文本获取字符(varName, 0)
+        若 ch1 == "t" 则 {
+            若 文本长度(varName) > 5 则 {
+                定义 可变 ch2: 文本
+                ch2 = 文本获取字符(varName, 1)
+                若 ch2 == "o" 则 {
+                    /* tok.xxx */
+                    isFieldAssign = 1
+                    baseName = "tok"
+                    fieldName = 文本获取字符(varName, 4) + 文本获取字符(varName, 5)
+                }
+            }
+        } 否则 若 ch1 == "l" 则 {
+            /* lex.xxx */
+            isFieldAssign = 1
+            baseName = "lex"
+            fieldName = 文本获取字符(varName, 4) + 文本获取字符(varName, 5)
+        } 否则 若 ch1 == "c" 则 {
+            /* cg.xxx 或 compiler 相关 */
+            isFieldAssign = 1
+            baseName = "cg"
+            fieldName = 文本获取字符(varName, 3) + 文本获取字符(varName, 4)
+        } 否则 若 ch1 == "p" 则 {
+            /* p.xxx */
+            isFieldAssign = 1
+            baseName = "p"
+            fieldName = 文本获取字符(varName, 2) + 文本获取字符(varName, 3)
+        } 否则 若 ch1 == "a" 则 {
+            /* ast.xxx */
+            isFieldAssign = 1
+            baseName = "ast"
+            fieldName = 文本获取字符(varName, 4) + 文本获取字符(varName, 5)
+        }
+    }
+
+    若 isFieldAssign == 1 则 {
+        定义 可变 basePtr: 文本
+        basePtr = codegen查找变量(cg, baseName)
+        若 basePtr != "" 则 {
+            定义 可变 fieldOffset: 文本
+            fieldOffset = ""
+            定义 可变 fieldType: 文本
+            fieldType = ""
+            /* 根据基础变量名 + 字段名查表 */
+            /* Token fields */
+            若 baseName == "tok" 则 {
+                若 fieldName == "类型" 则 { fieldOffset = "0"; fieldType = "i64" }
+                否则 若 fieldName == "值" 则 { fieldOffset = "8"; fieldType = "i8*" }
+                否则 若 fieldName == "行号" 则 { fieldOffset = "16"; fieldType = "i64" }
+                否则 若 fieldName == "列号" 则 { fieldOffset = "24"; fieldType = "i64" }
+                否则 若 fieldName == "开始位置" 则 { fieldOffset = "32"; fieldType = "i64" }
+                否则 若 fieldName == "结束位置" 则 { fieldOffset = "40"; fieldType = "i64" }
+            }
+            /* Lexer fields */
+            若 baseName == "lex" 则 {
+                若 fieldName == "源码" 则 { fieldOffset = "0"; fieldType = "i8*" }
+                否则 若 fieldName == "位置" 则 { fieldOffset = "8"; fieldType = "i64" }
+                否则 若 fieldName == "长度" 则 { fieldOffset = "16"; fieldType = "i64" }
+                否则 若 fieldName == "行号" 则 { fieldOffset = "24"; fieldType = "i64" }
+                否则 若 fieldName == "列号" 则 { fieldOffset = "32"; fieldType = "i64" }
+                否则 若 fieldName == "当前字符" 则 { fieldOffset = "40"; fieldType = "i64" }
+                否则 若 fieldName == "开始位置" 则 { fieldOffset = "48"; fieldType = "i64" }
+                否则 若 fieldName == "当前位置" 则 { fieldOffset = "56"; fieldType = "i64" }
+            }
+            /* Codegen fields */
+            若 baseName == "cg" 则 {
+                若 fieldName == "output" 则 { fieldOffset = "24"; fieldType = "i8*" }
+                否则 若 fieldName == "indent" 则 { fieldOffset = "32"; fieldType = "i64" }
+                否则 若 fieldName == "tempCount" 则 { fieldOffset = "8"; fieldType = "i64" }
+                否则 若 fieldName == "labelCount" 则 { fieldOffset = "16"; fieldType = "i64" }
+                否则 若 fieldName == "funcCount" 则 { fieldOffset = "40"; fieldType = "i64" }
+            }
+            /* Sema fields */
+            若 baseName == "sema" 则 {
+                若 fieldName == "错误计数" 则 { fieldOffset = "56"; fieldType = "i64" }
+                否则 若 fieldName == "警告计数" 则 { fieldOffset = "64"; fieldType = "i64" }
+            }
+            若 fieldOffset != "" 则 {
+                若 列表长度(assignNode.children) > 0 则 {
+                    定义 可变 rightNode: AST节点
+                    rightNode = 列表获取(assignNode.children, 0)
+                    定义 可变 rightVal: 文本
+                    rightVal = codegen遍历表达式(cg, rightNode)
+                    定义 可变 gepLabel: 文本
+                    gepLabel = codegenNewTemp(cg)
+                    codegenEmit(cg, "  %" + gepLabel + " = getelementptr i8, i8* %" + basePtr + ", i32 " + fieldOffset)
+                    定义 可变 typedPtr: 文本
+                    typedPtr = codegenNewTemp(cg)
+                    codegenEmit(cg, "  %" + typedPtr + " = bitcast i8* %" + gepLabel + " to " + fieldType + "*")
+                    codegenEmit(cg, "  store " + fieldType + " %" + rightVal + ", " + fieldType + "* %" + typedPtr)
+                }
+                返回
+            }
+        }
+    }
+
+    /* 原有逻辑：简单变量赋值 */
     定义 可变 tmpPtr: 文本
     tmpPtr = codegen查找变量(cg, varName)
     若 tmpPtr == "" 则 {
-        /* 变量未找到，使用默认命名 */
         tmpPtr = varName + "_slot"
     }
 
-    /* 查找变量类型 */
     定义 可变 varType: 文本
     varType = codegen查找变量类型(cg, varName)
     若 varType == "" 则 {
-        varType = "i64"  // 默认类型
+        varType = "i64"
     }
 
-    /* 生成右侧表达式 */
     若 列表长度(assignNode.children) > 0 则 {
         定义 可变 rightNode: AST节点
         rightNode = 列表获取(assignNode.children, 0)

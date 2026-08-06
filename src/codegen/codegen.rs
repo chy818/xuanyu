@@ -137,13 +137,6 @@ impl CodeGenerator {
             self.register_struct_layout(struct_def);
         }
 
-        // 先发出不透明的前向声明（避免类型引用顺序问题）
-        for struct_def in &module.structs {
-            let struct_name = self.translate_def_name(&struct_def.name);
-            let llvm_name = format!("%struct.{}", struct_name);
-            self.emit(&format!("{} = type opaque\n", llvm_name));
-        }
-
         // 生成 LLVM 结构体类型定义
         for struct_def in &module.structs {
             self.emit_struct_type_definition(struct_def);
@@ -316,7 +309,14 @@ impl CodeGenerator {
 
             // Rule 1: store <ty> <val>, <ty>* <ptr> → store <ty> <val>, ptr <ptr>
             if trimmed.starts_with("store ") {
-                // 找到逗号后的指针类型部分
+                // 先处理值类型：如果值类型是指针（如 %struct.X*），转为 ptr
+                let parts: Vec<&str> = new_line.split_whitespace().collect();
+                if parts.len() >= 4 && parts[1].ends_with('*') && parts[1] != "ptr" {
+                    let mut new_parts: Vec<String> = parts.iter().map(|s| s.to_string()).collect();
+                    new_parts[1] = "ptr".to_string();
+                    new_line = new_parts.join(" ");
+                }
+                // 再处理指针类型（逗号后）
                 if let Some(comma_pos) = new_line.find(',') {
                     let before_comma = &new_line[..comma_pos];
                     let after_comma = &new_line[comma_pos+1..];
@@ -380,7 +380,23 @@ impl CodeGenerator {
                     }
                 }
             }
-            // Rule 5: 函数签名中的 typed pointers → ptr
+            // Rule 5: ptrtoint / inttoptr 中的 typed pointers → ptr
+            // ptrtoint i8* %val to i64 → ptrtoint ptr %val to i64
+            // inttoptr i64 %val to i8* → inttoptr i64 %val to ptr
+            else if trimmed.starts_with("ptrtoint ") {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 5 {
+                    // ptrtoint <ty>* <val> to <to_ty>
+                    new_line = format!("{} = ptrtoint ptr {} to {}", parts[0], parts[2], parts[4]);
+                }
+            } else if trimmed.starts_with("inttoptr ") {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 5 {
+                    // inttoptr <from_ty> <val> to <ty>*
+                    new_line = format!("{} = inttoptr {} {} to ptr", parts[0], parts[1], parts[2]);
+                }
+            }
+            // Rule 6: 函数签名中的 typed pointers → ptr
             // define/call/declare 中的 i8* %x, %struct.X* %x, i8** %x
             else if trimmed.starts_with("define ") || trimmed.starts_with("declare ")
                 || trimmed.starts_with("call ") {
@@ -603,6 +619,7 @@ impl CodeGenerator {
         emit_if_new(&mut self.ir, "declare i8* @rt_string_substring(i8*, i64, i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i8* @rt_string_slice(i8*, i64, i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i64 @rt_string_len(i8*)", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_string_indexOf(i8*, i8*)", extern_funcs);
 
         // 读取行
         emit_if_new(&mut self.ir, "declare i8* @rt_readline()", extern_funcs);
@@ -1041,6 +1058,7 @@ impl CodeGenerator {
                             let right_actual_type = self.variable_types.get(&value_val)
                                 .cloned()
                                 .unwrap_or_else(|| self.infer_expression_type(&assign_stmt.value));
+                            // struct value conversion handled below
                             // 当右值实际是结构体指针但目标变量是结构体值时，加载值
                             let final_val = if right_actual_type.ends_with('*') && var_type.starts_with("%struct.") {
                                 self.generate_type_conversion(&value_val, &right_actual_type, &var_type)
@@ -1054,42 +1072,36 @@ impl CodeGenerator {
                     }
                     Expr::MemberAccess(member) => {
                         let field_name = &member.member;
-                        let object_val = self.generate_expression(&member.object)?;
-                        let actual_type = self.variable_types.get(&object_val).cloned().unwrap_or_else(|| self.infer_expression_type(&member.object));
-                        
-                        let (_obj_type_for_offset, field_offset, field_llvm_type) = if actual_type.starts_with("%struct.") && actual_type.ends_with('*') {
-                            let struct_type = &actual_type[0..actual_type.len()-1];
-                            let (offset, ftype) = self.calculate_field_offset_and_type(struct_type, field_name);
-                            (struct_type.to_string(), offset, ftype)
-                        } else if actual_type.starts_with("%struct.") {
-                            let (offset, ftype) = self.calculate_field_offset_and_type(&actual_type, field_name);
-                            (actual_type.clone(), offset, ftype)
-                        } else {
-                            let obj_type = self.infer_expression_type(&member.object);
-                            let (offset, ftype) = self.calculate_field_offset_and_type(&obj_type, field_name);
-                            (obj_type, offset, ftype)
-                        };
-                        
-                        let ptr_val = if actual_type.ends_with('*') {
-                            object_val
-                        } else if actual_type == "i64" && !actual_type.starts_with("%struct.") {
-                            let ptr = self.new_label("assign_field_ptr");
-                            self.emit(&format!("    %{} = inttoptr i64 %{} to i8*", ptr, object_val));
-                            ptr
-                        } else if actual_type.starts_with("%struct.") {
-                            // actual_type 是 %struct.T（值类型），创建临时 alloca 获取指针用于 GEP
-                            let tmp_alloca = self.new_label("assign_field_ptr");
-                            self.emit(&format!("    %{} = alloca {}, align 8", tmp_alloca, actual_type));
-                            self.emit(&format!("    store {} %{}, {}* %{}", actual_type, object_val, actual_type, tmp_alloca));
-                            tmp_alloca
-                        } else {
-                            object_val
-                        };
-                        
-                        let ptr_as_i8 = if actual_type.starts_with("%struct.") && actual_type.ends_with('*') {
-                            let struct_type = &actual_type[0..actual_type.len()-1];
+                        // 关键：对于结构体字段赋值，必须用原始 alloca 指针做 GEP
+                        let (ptr_val, actual_type, field_offset, field_llvm_type) =
+                            if let Expr::Identifier(ident) = &*member.object {
+                                if let Some(alloca) = self.variables.get(&ident.name) {
+                                    let var_type = self.variable_types.get(&ident.name).cloned().unwrap_or_else(|| "i64".to_string());
+                                    if var_type.starts_with("%struct.") {
+                                        let (off, ftype) = self.calculate_field_offset_and_type(&var_type, field_name);
+                                        (alloca.clone(), var_type, off, ftype)
+                                    } else {
+                                        let ov = self.generate_expression(&member.object)?;
+                                        let (off, ftype) = self.calculate_field_offset_and_type(&var_type, field_name);
+                                        (ov, var_type, off, ftype)
+                                    }
+                                } else {
+                                    let ov = self.generate_expression(&member.object)?;
+                                    let at = self.infer_expression_type(&member.object);
+                                    let (off, ftype) = self.calculate_field_offset_and_type(&at, field_name);
+                                    (ov, at, off, ftype)
+                                }
+                            } else {
+                                let ov = self.generate_expression(&member.object)?;
+                                let at = self.variable_types.get(&ov).cloned().unwrap_or_else(|| self.infer_expression_type(&member.object));
+                                let (off, ftype) = self.calculate_field_offset_and_type(&at, field_name);
+                                (ov, at, off, ftype)
+                            };
+
+                        let ptr_as_i8 = if actual_type.starts_with("%struct.") {
                             let cast = self.new_label("struct_to_i8");
-                            self.emit(&format!("    %{} = bitcast {}* %{} to i8*", cast, struct_type, ptr_val));
+                            let base_type = actual_type.trim_end_matches('*');
+                            self.emit(&format!("    %{} = bitcast {}* %{} to i8*", cast, base_type, ptr_val));
                             cast
                         } else {
                             ptr_val.clone()
@@ -1103,15 +1115,22 @@ impl CodeGenerator {
                         let right_type = self.infer_expression_type(&assign_stmt.value);
                         if field_llvm_type.starts_with("%struct.") {
                             let struct_val = if right_type.starts_with("%struct.") && right_type.ends_with('*') {
-                                value_val
+                                value_val  // 是指针，直接用于 store
                             } else if right_type == "i64" {
                                 let struct_ptr = self.new_label("struct_ptr");
                                 self.emit(&format!("    %{} = inttoptr i64 %{} to {}*", struct_ptr, value_val, field_llvm_type));
                                 struct_ptr
                             } else {
-                                value_val
+                                value_val  // 结构体值，直接用于 store
                             };
-                            self.emit(&format!("    store {}* %{}, {}* %{}", field_llvm_type, struct_val, field_llvm_type, typed_ptr));
+                            // 根据值类型选择正确的 store 格式
+                            if right_type.ends_with('*') || right_type == "i64" {
+                                // 指针类型值
+                                self.emit(&format!("    store {}* %{}, {}* %{}", field_llvm_type, struct_val, field_llvm_type, typed_ptr));
+                            } else {
+                                // 值类型：store 结构体值本身
+                                self.emit(&format!("    store {} %{}, {}* %{}", field_llvm_type, struct_val, field_llvm_type, typed_ptr));
+                            }
                         } else {
                             let final_val = if right_type != field_llvm_type {
                                 self.generate_type_conversion(&value_val, &right_type, &field_llvm_type)
@@ -1202,13 +1221,9 @@ impl CodeGenerator {
             var_type.clone()
         };
 
-        // stored_var_type: 对于结构体类型，存储为指针类型 %struct.T*
-        // alloca %struct.T 创建的是 %struct.T*，后续访问需要用指针做 GEP
-        let stored_var_type = if final_var_type.starts_with("%struct.") {
-            format!("{}*", final_var_type)
-        } else {
-            final_var_type.clone()
-        };
+        // stored_var_type 直接使用 final_var_type，不加 * 后缀
+        // alloca %struct.T 创建 %struct.T*，变量的"值类型"是 %struct.T
+        let stored_var_type = final_var_type.clone();
 
         if let Some(initializer) = &let_stmt.initializer {
             let expr_val = self.generate_expression(initializer)?;
@@ -1577,16 +1592,14 @@ impl CodeGenerator {
                         .cloned()
                         .unwrap_or_else(|| "i64".to_string());
 
-                    if var_type.starts_with("%struct.") && var_type.ends_with('*') {
-                        // 变量类型是 %struct.T*（已经是指针），alloca 就是这个指针
-                        // 直接返回 alloca，不加载值
-                        self.variable_types.insert(alloca.clone(), var_type.clone());
-                        Ok(alloca)
-                    } else if var_type.starts_with("%struct.") {
+                    if var_type.starts_with("%struct.") {
                         // 变量类型是 %struct.T（值类型），alloca 是 %struct.T*
-                        // 返回 alloca（指针），供成员访问时做 GEP
-                        self.variable_types.insert(alloca.clone(), format!("{}*", var_type));
-                        Ok(alloca)
+                        // 剥离可能被污染的 * 后缀（某些路径可能错误地存入 %struct.T*）
+                        let clean_type = var_type.trim_end_matches('*').to_string();
+                        let load = self.new_label("id");
+                        self.emit(&format!("    %{} = load {}, {}* %{}", load, clean_type, clean_type, alloca));
+                        self.variable_types.insert(load.clone(), clean_type.clone());
+                        Ok(load)
                     } else if var_type == "i8*" {
                         let load = self.new_label("id");
                         self.emit(&format!("    %{} = load i8*, i8** %{}", load, alloca));
@@ -1767,6 +1780,7 @@ impl CodeGenerator {
                         self.emit(&format!("    %{} = bitcast i8* %{} to {}*", result_ptr, result, field_llvm_type));
                         
                         if field_llvm_type.starts_with("%struct.") {
+                            // 返回指针，供需要指针的调用者（如 struct field assignment）
                             self.variable_types.insert(result_ptr.clone(), format!("{}*", field_llvm_type));
                             Ok(result_ptr)
                         } else {
@@ -2029,15 +2043,38 @@ impl CodeGenerator {
                     .unwrap_or_else(|| self.infer_expression_type(&index_access.object));
 
                 if object_type == "i8*" {
-                    // 字符串或列表索引访问
-                    let char_ptr = self.new_label("char_ptr");
-                    self.emit(&format!("    %{} = call i8* @rt_string_char_at(i8* %{}, i64 %{})", char_ptr, object_val, index_val));
-                    let char_code = self.new_label("char_code");
-                    self.emit(&format!("    %{} = call i64 @rt_char_to_code(i8* %{})", char_code, char_ptr));
-                    self.variable_types.insert(char_code.clone(), "i64".to_string());
-                    Ok(char_code)
+                    // 区分字符串索引（char access）和列表索引（element access）
+                    // 检查是否是已知的列表字段或列表变量
+                    let is_list = match &*index_access.object {
+                        Expr::MemberAccess(member) => {
+                            // p.tokens[pos] — struct field access
+                            let field_name = &member.member;
+                            // fields named "tokens", "children", "items", "elements" etc are lists
+                            field_name == "tokens" || field_name == "children" ||
+                            field_name == "items" || field_name == "errors" ||
+                            field_name.ends_with("列表")
+                        }
+                        Expr::Identifier(ident) => {
+                            // variable name ending in "s" might be a list, but be conservative
+                            let name = &ident.name;
+                            name.ends_with("s") || name.contains("列表")
+                        }
+                        _ => false,
+                    };
+                    if is_list {
+                        let elem = self.new_label("list_elem");
+                        self.emit(&format!("    %{} = call i8* @rt_list_get(i8* %{}, i64 %{})", elem, object_val, index_val));
+                        self.variable_types.insert(elem.clone(), "i8*".to_string());
+                        Ok(elem)
+                    } else {
+                        let char_ptr = self.new_label("char_ptr");
+                        self.emit(&format!("    %{} = call i8* @rt_string_char_at(i8* %{}, i64 %{})", char_ptr, object_val, index_val));
+                        let char_code = self.new_label("char_code");
+                        self.emit(&format!("    %{} = call i64 @rt_char_to_code(i8* %{})", char_code, char_ptr));
+                        self.variable_types.insert(char_code.clone(), "i64".to_string());
+                        Ok(char_code)
+                    }
                 } else if object_type == "i64" {
-                    // 整数类型的索引访问：先将 i64 转换为 i8* 指针，再进行索引
                     let ptr = self.new_label("idx_ptr");
                     self.emit(&format!("    %{} = inttoptr i64 %{} to i8*", ptr, object_val));
                     let char_ptr = self.new_label("idx_char");
@@ -2133,6 +2170,8 @@ impl CodeGenerator {
                                 .cloned()
                                 .unwrap_or_else(|| self.infer_expression_type(&binary.right));
 
+
+
                             // 当右值实际是结构体指针（如 sret 调用返回的 agg_slot）但目标变量是结构体值时，
                             // 需要从指针加载结构体值
                             let final_val = if right_actual_type.ends_with('*') && var_type.starts_with("%struct.") {
@@ -2149,42 +2188,36 @@ impl CodeGenerator {
                     }
                     Expr::MemberAccess(member) => {
                         let field_name = &member.member;
-                        let object_val = self.generate_expression(&member.object)?;
-                        let actual_type = self.variable_types.get(&object_val).cloned().unwrap_or_else(|| self.infer_expression_type(&member.object));
-                        
-                        let (_obj_type_for_offset, field_offset, field_llvm_type) = if actual_type.starts_with("%struct.") && actual_type.ends_with('*') {
-                            let struct_type = &actual_type[0..actual_type.len()-1];
-                            let (offset, ftype) = self.calculate_field_offset_and_type(struct_type, field_name);
-                            (struct_type.to_string(), offset, ftype)
-                        } else if actual_type.starts_with("%struct.") {
-                            let (offset, ftype) = self.calculate_field_offset_and_type(&actual_type, field_name);
-                            (actual_type.clone(), offset, ftype)
-                        } else {
-                            let obj_type = self.infer_expression_type(&member.object);
-                            let (offset, ftype) = self.calculate_field_offset_and_type(&obj_type, field_name);
-                            (obj_type, offset, ftype)
-                        };
-                        
-                        let ptr_val = if actual_type.ends_with('*') {
-                            object_val
-                        } else if actual_type == "i64" && !actual_type.starts_with("%struct.") {
-                            let ptr = self.new_label("assign_field_ptr");
-                            self.emit(&format!("    %{} = inttoptr i64 %{} to i8*", ptr, object_val));
-                            ptr
-                        } else if actual_type.starts_with("%struct.") {
-                            // actual_type 是 %struct.T（值类型），创建临时 alloca 获取指针用于 GEP
-                            let tmp_alloca = self.new_label("assign_field_ptr");
-                            self.emit(&format!("    %{} = alloca {}, align 8", tmp_alloca, actual_type));
-                            self.emit(&format!("    store {} %{}, {}* %{}", actual_type, object_val, actual_type, tmp_alloca));
-                            tmp_alloca
-                        } else {
-                            object_val
-                        };
-                        
-                        let ptr_as_i8 = if actual_type.starts_with("%struct.") && actual_type.ends_with('*') {
-                            let struct_type = &actual_type[0..actual_type.len()-1];
+                        // 关键：对于结构体字段赋值，必须用原始 alloca 指针做 GEP
+                        let (ptr_val, actual_type, field_offset, field_llvm_type) =
+                            if let Expr::Identifier(ident) = &*member.object {
+                                if let Some(alloca) = self.variables.get(&ident.name) {
+                                    let var_type = self.variable_types.get(&ident.name).cloned().unwrap_or_else(|| "i64".to_string());
+                                    if var_type.starts_with("%struct.") {
+                                        let (off, ftype) = self.calculate_field_offset_and_type(&var_type, field_name);
+                                        (alloca.clone(), var_type, off, ftype)
+                                    } else {
+                                        let ov = self.generate_expression(&member.object)?;
+                                        let (off, ftype) = self.calculate_field_offset_and_type(&var_type, field_name);
+                                        (ov, var_type, off, ftype)
+                                    }
+                                } else {
+                                    let ov = self.generate_expression(&member.object)?;
+                                    let at = self.infer_expression_type(&member.object);
+                                    let (off, ftype) = self.calculate_field_offset_and_type(&at, field_name);
+                                    (ov, at, off, ftype)
+                                }
+                            } else {
+                                let ov = self.generate_expression(&member.object)?;
+                                let at = self.variable_types.get(&ov).cloned().unwrap_or_else(|| self.infer_expression_type(&member.object));
+                                let (off, ftype) = self.calculate_field_offset_and_type(&at, field_name);
+                                (ov, at, off, ftype)
+                            };
+
+                        let ptr_as_i8 = if actual_type.starts_with("%struct.") {
                             let cast = self.new_label("struct_to_i8");
-                            self.emit(&format!("    %{} = bitcast {}* %{} to i8*", cast, struct_type, ptr_val));
+                            let base_type = actual_type.trim_end_matches('*');
+                            self.emit(&format!("    %{} = bitcast {}* %{} to i8*", cast, base_type, ptr_val));
                             cast
                         } else {
                             ptr_val.clone()
@@ -2197,7 +2230,11 @@ impl CodeGenerator {
                         
                         let right_type = self.infer_expression_type(&binary.right);
                         if field_llvm_type.starts_with("%struct.") {
-                            self.emit(&format!("    store {}* %{}, {}* %{}", field_llvm_type, right_val, field_llvm_type, typed_ptr));
+                            if right_type.ends_with('*') || right_type == "i64" {
+                                self.emit(&format!("    store {}* %{}, {}* %{}", field_llvm_type, right_val, field_llvm_type, typed_ptr));
+                            } else {
+                                self.emit(&format!("    store {} %{}, {}* %{}", field_llvm_type, right_val, field_llvm_type, typed_ptr));
+                            }
                         } else {
                             let final_val = if right_type != field_llvm_type {
                                 self.generate_type_conversion(&right_val, &right_type, &field_llvm_type)
@@ -2369,8 +2406,11 @@ impl CodeGenerator {
                 Ok(result)
             }
             BinaryOp::Eq => {
-                let left_type = self.infer_expression_type(&binary.left);
-                let right_type = self.infer_expression_type(&binary.right);
+                // 优先从实际值的 variable_types 获取类型（比 infer_expression_type 更准确）
+                let left_type = self.variable_types.get(&left_val).cloned()
+                    .unwrap_or_else(|| self.infer_expression_type(&binary.left));
+                let right_type = self.variable_types.get(&right_val).cloned()
+                    .unwrap_or_else(|| self.infer_expression_type(&binary.right));
                 if left_type == "i8*" || right_type == "i8*" {
                     let l_val = if left_type != "i8*" { self.generate_type_conversion(&left_val, &left_type, "i8*") } else { left_val.clone() };
                     let r_val = if right_type != "i8*" { self.generate_type_conversion(&right_val, &right_type, "i8*") } else { right_val.clone() };
@@ -2420,8 +2460,10 @@ impl CodeGenerator {
                 Ok(result)
             }
             BinaryOp::Ne => {
-                let left_type = self.infer_expression_type(&binary.left);
-                let right_type = self.infer_expression_type(&binary.right);
+                let left_type = self.variable_types.get(&left_val).cloned()
+                    .unwrap_or_else(|| self.infer_expression_type(&binary.left));
+                let right_type = self.variable_types.get(&right_val).cloned()
+                    .unwrap_or_else(|| self.infer_expression_type(&binary.right));
                 if left_type == "i8*" || right_type == "i8*" {
                     let l_val = if left_type != "i8*" { self.generate_type_conversion(&left_val, &left_type, "i8*") } else { left_val.clone() };
                     let r_val = if right_type != "i8*" { self.generate_type_conversion(&right_val, &right_type, "i8*") } else { right_val.clone() };
@@ -2646,45 +2688,44 @@ impl CodeGenerator {
     fn match_builtin_return_type(&self, func_name: &str) -> Option<String> {
         match func_name {
             // 返回 i8* 的函数
-            "rt_list_new" => Some("i8*".to_string()),
-            "rt_list_get" => Some("i8*".to_string()),
+            "rt_list_new" | "列表" => Some("i8*".to_string()),
+            "rt_list_get" | "列表获取" => Some("i8*".to_string()),
             "rt_str_new" => Some("i8*".to_string()),
-            "rt_str_concat" => Some("i8*".to_string()),
-            "rt_string_concat" => Some("i8*".to_string()),
+            "rt_str_concat" | "rt_string_concat" | "文本拼接" => Some("i8*".to_string()),
             "rt_string_substring" => Some("i8*".to_string()),
             "rt_string_slice" => Some("i8*".to_string()),
-            "rt_readline" => Some("i8*".to_string()),
+            "rt_readline" | "读取行" => Some("i8*".to_string()),
             "rt_malloc" => Some("i8*".to_string()),
             "str_contains" => Some("i8*".to_string()),
             // 返回 i64 的函数
-            "rt_list_len" => Some("i64".to_string()),
-            "rt_string_len" => Some("i64".to_string()),
-            // UTF-8 helper functions
-            "rt_utf8_byte_length" => Some("i64".to_string()),
-            "rt_is_utf8_leader" => Some("i64".to_string()),
-            "rt_is_utf8_continuation" => Some("i64".to_string()),
-            "rt_string_char_at" => Some("i8*".to_string()),
-            "rt_char_to_code" => Some("i64".to_string()),
-            "rt_code_to_char" => Some("i8*".to_string()),
-            "rt_str_to_int" => Some("i64".to_string()),
-            "rt_int_to_str" => Some("i8*".to_string()),
+            "rt_list_len" | "列表长度" => Some("i64".to_string()),
+            "rt_string_len" | "文本长度" => Some("i64".to_string()),
+            "rt_utf8_byte_length" | "utf8字节长度" => Some("i64".to_string()),
+            "rt_string_indexOf" | "文本查找" => Some("i64".to_string()),
+            "rt_is_utf8_leader" | "是utf8首字节" => Some("i64".to_string()),
+            "rt_is_utf8_continuation" | "是utf8续字节" => Some("i64".to_string()),
+            "rt_string_char_at" | "文本取字符" => Some("i8*".to_string()),
+            "rt_char_to_code" | "字符编码" => Some("i64".to_string()),
+            "rt_code_to_char" | "编码转字符" => Some("i8*".to_string()),
+            "rt_str_to_int" | "文本转整数" => Some("i64".to_string()),
+            "rt_int_to_str" | "整数转文本" => Some("i8*".to_string()),
             "rt_string_fromChar" => Some("i8*".to_string()),
             "argv" => Some("i8*".to_string()),
-            "argc" => Some("i64".to_string()),
-            "file_read" => Some("i8*".to_string()),
-            "file_write" => Some("i32".to_string()),
-            "file_exists" => Some("i32".to_string()),
-            "exec_cmd" => Some("i32".to_string()),
-            "print_int" => Some("i64".to_string()),
+            "argc" | "参数个数" => Some("i64".to_string()),
+            "file_read" | "读取文件" => Some("i8*".to_string()),
+            "file_write" | "写入文件" => Some("i32".to_string()),
+            "file_exists" | "文件存在" => Some("i32".to_string()),
+            "exec_cmd" | "执行命令" => Some("i32".to_string()),
+            "print_int" | "打印整数" => Some("i64".to_string()),
             "str_to_int" => Some("i64".to_string()),
             // 无返回的函数
-            "rt_list_append" => None, // void
-            "rt_list_set" => None,    // void
-            "rt_print" => None,       // void
-            "rt_println" => None,     // void
-            "rt_error" => None,       // void
-            "rt_free" => None,        // void
-            _ => None,                // 未知
+            "rt_list_append" | "列表追加" => None,
+            "rt_list_set" | "列表设置" => None,
+            "rt_print" | "打印" => None,
+            "rt_println" | "打印行" => None,
+            "rt_error" | "报错" => None,
+            "rt_free" => None,
+            _ => None,
         }
     }
 
@@ -2730,7 +2771,7 @@ impl CodeGenerator {
             "rt_list_len" => vec!["i8*".to_string()],
             "rt_str_concat" => vec!["i8*".to_string(), "i8*".to_string()],
             "rt_string_concat" => vec!["i8*".to_string(), "i8*".to_string()],
-            "rt_string_substring" => vec!["i8*".to_string(), "i64".to_string(), "i64".to_string()],
+            "rt_string_substring" | "rt_string_indexOf" | "文本查找" => vec!["i8*".to_string(), "i8*".to_string()],
             "rt_string_slice" => vec!["i8*".to_string(), "i64".to_string(), "i64".to_string()],
             "rt_string_len" => vec!["i8*".to_string()],
             // UTF-8 helper functions
@@ -2964,8 +3005,9 @@ impl CodeGenerator {
         if simple_func_name == "print" || simple_func_name == "rt_print" {
             // 打印函数 - 需要类型转换
             if !args.is_empty() {
-                // 获取参数的实际类型
-                let actual_type = self.infer_arg_type(&call.arguments[0]);
+                // 从实际值的 variable_types 获取类型（比 infer 更准确）
+                let actual_type = self.variable_types.get(&args[0]).cloned()
+                    .unwrap_or_else(|| self.infer_arg_type(&call.arguments[0]));
                 // 如果不是 i8*，需要转换
                 if actual_type != "i8*" {
                     let converted_val = self.generate_type_conversion(&args[0], &actual_type, "i8*");
@@ -2978,9 +3020,8 @@ impl CodeGenerator {
         } else if simple_func_name == "println" {
             // 打印行函数 - 需要类型转换
             if !args.is_empty() {
-                // 获取参数的实际类型
-                let actual_type = self.infer_arg_type(&call.arguments[0]);
-                // 如果不是 i8*，需要转换
+                let actual_type = self.variable_types.get(&args[0]).cloned()
+                    .unwrap_or_else(|| self.infer_arg_type(&call.arguments[0]));
                 if actual_type != "i8*" {
                     let converted_val = self.generate_type_conversion(&args[0], &actual_type, "i8*");
                     self.emit(&format!("    call void @rt_println(i8* %{})", converted_val));
@@ -2992,9 +3033,8 @@ impl CodeGenerator {
         } else if simple_func_name == "error" {
             // 报错函数 - 需要类型转换
             if !args.is_empty() {
-                // 获取参数的实际类型
-                let actual_type = self.infer_arg_type(&call.arguments[0]);
-                // 如果不是 i8*，需要转换
+                let actual_type = self.variable_types.get(&args[0]).cloned()
+                    .unwrap_or_else(|| self.infer_arg_type(&call.arguments[0]));
                 if actual_type != "i8*" {
                     let converted_val = self.generate_type_conversion(&args[0], &actual_type, "i8*");
                     self.emit(&format!("    call void @rt_error(i8* %{})", converted_val));
@@ -3006,13 +3046,16 @@ impl CodeGenerator {
         } else if simple_func_name == "rt_list_new" {
             // 列表创建函数，返回 i8*
             self.emit(&format!("    %{} = call i8* @rt_list_new()", result));
+            self.variable_types.insert(result.clone(), "i8*".to_string());
             Ok(result)
         } else if simple_func_name == "rt_list_append" {
             // 列表追加函数
             if args.len() >= 2 {
-                let a0_type = self.infer_arg_type(&call.arguments[0]);
+                let a0_type = self.variable_types.get(&args[0]).cloned()
+                    .unwrap_or_else(|| self.infer_arg_type(&call.arguments[0]));
                 let a0 = if a0_type != "i8*" { self.generate_type_conversion(&args[0], &a0_type, "i8*") } else { args[0].clone() };
-                let a1_type = self.infer_arg_type(&call.arguments[1]);
+                let a1_type = self.variable_types.get(&args[1]).cloned()
+                    .unwrap_or_else(|| self.infer_arg_type(&call.arguments[1]));
                 let a1 = if a1_type != "i8*" { self.generate_type_conversion(&args[1], &a1_type, "i8*") } else { args[1].clone() };
                 self.emit(&format!("    call void @rt_list_append(i8* %{}, i8* %{})", a0, a1));
             }
@@ -3020,7 +3063,8 @@ impl CodeGenerator {
         } else if simple_func_name == "rt_list_len" {
             // 列表长度函数
             if !args.is_empty() {
-                let arg_type = self.infer_arg_type(&call.arguments[0]);
+                let arg_type = self.variable_types.get(&args[0]).cloned()
+                    .unwrap_or_else(|| self.infer_arg_type(&call.arguments[0]));
                 let arg_val = if arg_type != "i8*" {
                     self.generate_type_conversion(&args[0], &arg_type, "i8*")
                 } else { args[0].clone() };
@@ -3028,23 +3072,27 @@ impl CodeGenerator {
             } else {
                 self.emit(&format!("    %{} = call i64 @rt_list_len(i8* null)", result));
             }
+            self.variable_types.insert(result.clone(), "i64".to_string());
             Ok(result)
         } else if simple_func_name == "rt_list_get" {
             // 列表获取函数
             if args.len() >= 2 {
-                let a0_type = self.infer_arg_type(&call.arguments[0]);
+                let a0_type = self.variable_types.get(&args[0]).cloned()
+                    .unwrap_or_else(|| self.infer_arg_type(&call.arguments[0]));
                 let a0 = if a0_type != "i8*" { self.generate_type_conversion(&args[0], &a0_type, "i8*") } else { args[0].clone() };
-                let a1_type = self.infer_arg_type(&call.arguments[1]);
+                let a1_type = self.variable_types.get(&args[1]).cloned()
+                    .unwrap_or_else(|| self.infer_arg_type(&call.arguments[1]));
                 let a1 = if a1_type != "i64" { self.generate_type_conversion(&args[1], &a1_type, "i64") } else { args[1].clone() };
                 self.emit(&format!("    %{} = call i8* @rt_list_get(i8* %{}, i64 %{})", result, a0, a1));
-                self.variable_types.insert(result.clone(), "i8*".to_string());
             } else if args.len() == 1 {
-                let a0_type = self.infer_arg_type(&call.arguments[0]);
+                let a0_type = self.variable_types.get(&args[0]).cloned()
+                    .unwrap_or_else(|| self.infer_arg_type(&call.arguments[0]));
                 let a0 = if a0_type != "i8*" { self.generate_type_conversion(&args[0], &a0_type, "i8*") } else { args[0].clone() };
                 self.emit(&format!("    %{} = call i8* @rt_list_get(i8* %{}, i64 0)", result, a0));
             } else {
                 self.emit(&format!("    %{} = call i8* @rt_list_get(i8* null, i64 0)", result));
             }
+            self.variable_types.insert(result.clone(), "i8*".to_string());
             Ok(result)
         } else if simple_func_name == "rt_str_new" {
             // 字符串创建函数，返回 i8*
@@ -3053,6 +3101,7 @@ impl CodeGenerator {
             } else {
                 self.emit(&format!("    %{} = call i8* @rt_str_new(i8* null)", result));
             }
+            self.variable_types.insert(result.clone(), "i8*".to_string());
             Ok(result)
         } else if simple_func_name == "rt_str_concat" || simple_func_name == "rt_string_concat" {
             // 字符串拼接函数，返回 i8*
@@ -3063,6 +3112,7 @@ impl CodeGenerator {
             } else {
                 self.emit(&format!("    %{} = call i8* @rt_str_concat(i8* null, i8* null)", result));
             }
+            self.variable_types.insert(result.clone(), "i8*".to_string());
             Ok(result)
         } else if simple_func_name == "rt_string_len" {
             // 字符串长度函数
@@ -3071,6 +3121,7 @@ impl CodeGenerator {
             } else {
                 self.emit(&format!("    %{} = call i64 @rt_string_len(i8* null)", result));
             }
+            self.variable_types.insert(result.clone(), "i64".to_string());
             Ok(result)
         } else if simple_func_name == "print_int" {
             // 打印整数函数
@@ -3238,11 +3289,14 @@ impl CodeGenerator {
             self.emit(&format!("    %{} = inttoptr i64 %{} to {}*", ptr, val, to_type));
             self.emit(&format!("    %{} = load {}, {}* %{}", result, to_type, to_type, ptr));
         } else if from_type.starts_with("%struct.") && to_type == "i8*" {
-            // 结构体转指针：先创建 alloca 存储，然后获取地址
-            let struct_addr = self.new_label("struct_addr");
-            self.emit(&format!("    %{} = alloca {}, align 8", struct_addr, from_type));
-            self.emit(&format!("    store {} %{}, {}* %{}", from_type, val, from_type, struct_addr));
-            self.emit(&format!("    %{} = bitcast {}* %{} to i8*", result, from_type, struct_addr));
+            // 结构体转指针：用 rt_malloc 堆分配，避免栈指针失效
+            let size = self.compute_struct_size_from_type(&from_type);
+            let heap_ptr = self.new_label("heap");
+            self.emit(&format!("    %{} = call i8* @rt_malloc(i64 {})", heap_ptr, size));
+            let typed_ptr = self.new_label("typed_ptr");
+            self.emit(&format!("    %{} = bitcast i8* %{} to {}*", typed_ptr, heap_ptr, from_type));
+            self.emit(&format!("    store {} %{}, {}* %{}", from_type, val, from_type, typed_ptr));
+            return heap_ptr;  // 直接返回已转换的 i8*，无需额外 bitcast
         } else if from_type == "i8*" && to_type.starts_with("%struct.") {
             // 指针转结构体：先转换为结构体指针，再加载结构体值
             let struct_ptr = self.new_label("struct_ptr");
@@ -3311,9 +3365,11 @@ impl CodeGenerator {
         match expr {
             Expr::Identifier(ident) => {
                 let var_name = ident.name.clone();
-                self.variable_types.get(&var_name)
+                let ty = self.variable_types.get(&var_name)
                     .cloned()
-                    .unwrap_or_else(|| "i64".to_string())
+                    .unwrap_or_else(|| "i64".to_string());
+                // 剥离可能被污染的 * 后缀（防御性）
+                if ty.starts_with("%struct.") { ty.trim_end_matches('*').to_string() } else { ty }
             },
             Expr::Literal(lit) => {
                 match &lit.kind {
@@ -3358,7 +3414,21 @@ impl CodeGenerator {
                     }
                 };
 
-                // 尝试查找不带模块名前缀的函数返回类型
+                // 先检查内置函数的返回类型（如 rt_list_new → i8*）
+                // 直接通过原始函数名查表，比复杂的模块前缀匹配更可靠
+                let orig_func_name = match &*call.function {
+                    Expr::Identifier(ident) => ident.name.clone(),
+                    _ => String::new(),
+                };
+                if !orig_func_name.is_empty() {
+                    if let Some(ret_type) = self.get_func_return_type(&orig_func_name) {
+                        return ret_type;
+                    }
+                }
+                // 也检查翻译后的函数名
+                if let Some(ret_type) = self.get_func_return_type(&base_func_name) {
+                    return ret_type;
+                }
                 if let Some(ret_type) = self.get_func_return_type(&base_func_name) {
                     ret_type
                 } else if !self.module_name.is_empty() {
@@ -3543,9 +3613,10 @@ impl CodeGenerator {
                 "文件存在" => "file_exists".to_string(),
                 "执行命令" => "exec_cmd".to_string(),
                 // V2 文本操作
-                "文本切片" => "rt_string_substring".to_string(),
+                "文本切片" | "文本截取" => "rt_string_substring".to_string(),
                 "文本获取字符" => "rt_string_char_at".to_string(),
                 "文本包含" => "str_contains".to_string(),
+                "文本查找" => "rt_string_indexOf".to_string(),
                 "文本转整数" => "rt_str_to_int".to_string(),
                 "整数转文本" => "rt_int_to_str".to_string(),
                 "详细输出" => "rt_print".to_string(),
@@ -3662,13 +3733,12 @@ impl CodeGenerator {
 
     fn calculate_field_offset_and_type(&self, struct_name: &str, field_name: &str) -> (i32, String) {
         let mut lookup_names = Vec::new();
-        
-        // 如果已经是 LLVM 结构体类型（如 %struct.fnToken_xxx），直接提取名称
-        let base_name = if struct_name.starts_with("%struct.") {
-            struct_name.trim_start_matches("%struct.")
-        } else {
-            struct_name
-        };
+
+        // 脱去 %struct. 前缀和 * 后缀（防御被污染的指针类型）
+        let cleaned = struct_name
+            .trim_start_matches("%struct.")
+            .trim_end_matches('*');
+        let base_name = cleaned;
         
         lookup_names.push(base_name.to_string());
         lookup_names.push(self.translate_struct_name(struct_name));
@@ -3683,12 +3753,11 @@ impl CodeGenerator {
             }
         }
         
-        if struct_name == "i8*" || struct_name == "i64" || struct_name == "double" {
-            for (_struct_name, fields) in &self.struct_field_layouts {
-                for (name, offset, llvm_type) in fields {
-                    if name == field_name {
-                        return (*offset, llvm_type.clone());
-                    }
+        // 全局搜索所有已注册的 struct 布局（跨模块兼容）
+        for (_struct_name, fields) in &self.struct_field_layouts {
+            for (name, offset, llvm_type) in fields {
+                if name == field_name {
+                    return (*offset, llvm_type.clone());
                 }
             }
         }
@@ -3713,13 +3782,12 @@ impl CodeGenerator {
      */
     fn infer_member_type(&self, struct_name: &str, field_name: &str) -> String {
         let mut lookup_names = Vec::new();
-        
-        // 如果已经是 LLVM 结构体类型（如 %struct.fnAST节点_xxx），直接提取名称
-        let base_name = if struct_name.starts_with("%struct.") {
-            struct_name.trim_start_matches("%struct.")
-        } else {
-            struct_name
-        };
+
+        // 脱去前缀和后缀
+        let cleaned = struct_name
+            .trim_start_matches("%struct.")
+            .trim_end_matches('*');
+        let base_name = cleaned;
         
         lookup_names.push(base_name.to_string());
         lookup_names.push(self.translate_struct_name(struct_name));
@@ -3734,12 +3802,11 @@ impl CodeGenerator {
             }
         }
         
-        if struct_name == "i8*" || struct_name == "i64" || struct_name == "double" {
-            for (_struct_name, fields) in &self.struct_field_layouts {
-                for (name, _, llvm_type) in fields {
-                    if name == field_name {
-                        return llvm_type.clone();
-                    }
+        // 如果按 struct 名没找到，搜索所有已注册的 struct 布局（跨模块兼容）
+        for (_struct_name, fields) in &self.struct_field_layouts {
+            for (name, _, llvm_type) in fields {
+                if name == field_name {
+                    return llvm_type.clone();
                 }
             }
         }
@@ -3760,7 +3827,8 @@ impl CodeGenerator {
             "表达式" | "表达式列表" | "声明" | "声明列表" |
             "函数" | "函数列表" | "变量" | "变量列表" |
             "结构体" | "结构体列表" | "字段" | "字段列表" |
-            "body" | "params" | "args" | "name" | "type" | "value" => "i8*".to_string(),
+            "body" | "params" | "args" | "name" | "type" | "value" |
+            "children" | "items" | "elements" => "i8*".to_string(),
             _ => "i64".to_string(),
         }
     }
@@ -3804,11 +3872,13 @@ impl CodeGenerator {
                 encoded.push_str(&format!("u{:x}", ch as u32));
             }
         }
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        base_name.hash(&mut hasher);
-        let hash = hasher.finish();
+        // 使用确定性哈希（不能用 DefaultHasher，它每次运行随机种子不同）
+        // 简单 FNV-1a 64-bit hash，确保相同输入始终产生相同输出
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for byte in base_name.as_bytes() {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
         format!("{}_{:x}", encoded, hash)
     }
 

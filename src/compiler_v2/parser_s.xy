@@ -154,6 +154,9 @@
     node.intValue = 0
     node.line = line
     node.children = 列表()
+    打印("DEBUG parseBlock: end, children=")
+    打印整数(列表长度(node.children))
+    打印("\n")
     返回 node
 }
 
@@ -450,6 +453,9 @@
         tok = parserPeekToken(p)
     }
 
+    打印("DEBUG parseBlock: end, children=")
+    打印整数(列表长度(node.children))
+    打印("\n")
     返回 node
 }
 
@@ -659,6 +665,7 @@
 
 /* 解析块语句 */
 函数 parseBlock(p: Parser): AST节点 {
+    打印("[BLOCK ENTER]\n")
     定义 可变 tok: Token
     tok = parserPeekToken(p)
     定义 可变 line: 整数
@@ -668,6 +675,7 @@
     node = parserCreateNode(18, "", "", line)  // 块语句
     node.children = 列表()
 
+    打印("DEBUG parseBlock: start\n")
     /* 消费 '{' */
     若 tok.值 == "{" 则 {
         parserConsume(p)
@@ -675,7 +683,17 @@
 
     /* 循环解析语句 */
     tok = parserPeekToken(p)
+    打印("DEBUG parseBlock: first body tok='")
+    打印(tok.值)
+    打印("' type=")
+    打印整数(tok.类型)
+    打印("\n")
     当 tok.值 != "}" && tok.值 != "" && tok.类型 != 6 则 {
+        打印("DEBUG blk: tok=")
+        打印(tok.值)
+        打印(" type=")
+        打印整数(tok.类型)
+        打印("\n")
         定义 可变 stmt: AST节点
 
         若 tok.值 == "定义" 则 {
@@ -986,6 +1004,9 @@
         parserConsume(p)
     }
 
+    打印("DEBUG parseBlock: end, children=")
+    打印整数(列表长度(node.children))
+    打印("\n")
     返回 node
 }
 
@@ -1290,17 +1311,26 @@
 
 /* 解析函数定义 */
 函数 parseFunction(p: Parser): AST节点 {
+    打印("[PFUNC enter]\n")
     /* 解析函数签名 */
     定义 可变 funcNode: AST节点
     funcNode = parseFunctionSignature(p)
+    打印("[PFUNC sig done]\n")
 
     /* 解析函数体 */
     定义 可变 bodyNode: AST节点
     定义 可变 tok: Token
     tok = parserPeekToken(p)
+    打印("[PARSEFUNC: peeked='")
+    打印(tok.值)
+    打印("' type=")
+    打印整数(tok.类型)
+    打印("]\n")
     若 tok.值 == "{" 则 {
+        打印("[PARSEFUNC: calling parseBlock]\n")
         bodyNode = parseBlock(p)
     } 否则 {
+        打印("[PARSEFUNC: calling parseExpression]\n")
         bodyNode = parseExpression(p)
     }
 
@@ -1997,6 +2027,11 @@
  * 这是解析器的外部入口函数
  */
 函数 parser分析Tokens(tokens: 列表, source: 文本): AST节点 {
+    打印("DEBUG parser入口: tokensPtr=")
+    打印(tokens)
+    打印(" srcLen=")
+    打印整数(文本长度(source))
+    打印("\n")
     定义 可变 p: Parser
     p = parserInit(tokens)
 
@@ -2005,14 +2040,29 @@
     progNode.children = 列表()
 
     定义 可变 tok: Token
+    打印("DEBUG parser: pos=") 打印整数(p.pos) 打印(" count=") 打印整数(p.tokenCount) 打印("\n")
+    打印("DEBUG parser: about to peek\n")
     tok = parserPeekToken(p)
+    打印("DEBUG parser: peek done, type=")
+    打印整数(tok.类型)
+    打印(" value='")
+    打印(tok.值)
+    打印("'\n")
+    打印("DEBUG parser: entering loop\n")
 
     /* 循环解析直到文件结束 */
     当 tok.类型 != 6 && tok.值 != "" 则 {
+        打印("DEBUG parser loop: tok=")
+        打印(tok.值)
+        打印(" type=")
+        打印整数(tok.类型)
+        打印("\n")
         若 tok.值 == "函数" || tok.值 == "function" 则 {
+            打印("DEBUG: calling parseFunction\n")
             定义 可变 funcNode: AST节点
             funcNode = parseFunction(p)
             progNode.children.追加(funcNode)
+            打印("DEBUG: parseFunction returned\n")
         } 否则 若 tok.值 == "结构体" || tok.值 == "struct" 则 {
             定义 可变 structNode: AST节点
             structNode = parseStructDefinition(p)
