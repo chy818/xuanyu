@@ -1876,7 +1876,7 @@
 /**
  * 遍历函数调用
  */
-函数 sema遍历函数调用(sema: Sema, funcName: 文本, args: AST节点): 整数 {
+函数 sema遍历函数调用(sema: Sema, funcName: 文本, args: 列表): 整数 {
     打印("分析函数调用: ")
     打印(funcName)
 
@@ -1891,9 +1891,9 @@
     /* 分析参数 */
     定义 可变 i: 整数
     i = 0
-    当 i < 列表长度(args.children) && i < 10 则 {
+    当 i < 列表长度(args) && i < 10 则 {
         定义 可变 arg: AST节点
-        arg = args.children[i]
+        arg = 列表获取(args, i)
         定义 可变 argType: 整数
         argType = sema遍历表达式(sema, arg)
         i = i + 1
@@ -1901,7 +1901,7 @@
 
     /* 推断返回类型 */
     定义 可变 returnType: 整数
-    returnType = 推断函数返回类型(funcName, args.children)
+    returnType = 推断函数返回类型(funcName, args)
 
     返回 returnType
 }

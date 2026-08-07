@@ -20,6 +20,45 @@
 /* ============ Codegen 结构 ============ */
 
 
+/* ============ LLVM 标识符转义 ============ */
+
+/**
+ * 转义 LLVM 标识符中的非 ASCII 字符为 uXX 格式（按字节转义）
+ * 注意：XY 的 文本[i] 返回字节值，非 Unicode 码点
+ * 简化版：仅用整数运算生成十六进制
+ */
+函数 escapeLLVM标识符(name: 文本): 文本 {
+    定义 可变 result: 文本
+    result = ""
+    定义 可变 hex: 文本
+    hex = "0123456789abcdef"
+    定义 可变 i: 整数
+    i = 0
+    当 i < 文本长度(name) 则 {
+        定义 可变 b: 整数
+        b = name[i]
+        若 b < 128 则 {
+            /* ASCII 字符直接追加 */
+            若 b == 95 则 {  /* '_' */
+                result = result + "_"
+            } 否则 {
+                result = result + 整数转字符(b)
+            }
+        } 否则 {
+            /* 非 ASCII 字节转为 uXX 格式 */
+            定义 可变 hi: 整数
+            hi = b / 16
+            定义 可变 lo: 整数
+            lo = b - hi * 16
+            result = result + "u"
+            result = result + 整数转字符(hex[hi])
+            result = result + 整数转字符(hex[lo])
+        }
+        i = i + 1
+    }
+    返回 result
+}
+
 /* ============ LLVM 类型映射 ============ */
 
 函数 getLLVMType(typeName: 文本): 文本 {
@@ -53,6 +92,7 @@
     cg.loopContextStack = 列表()
     cg.currentFunctionIndex = 0
     cg.functionIndexCounter = 0
+    cg.stringConstDefs = ""
     返回 cg
 }
 
@@ -1321,7 +1361,10 @@
     /* 输入函数 */
     codegenEmit(cg, "declare i64 @input_int()")
     codegenEmit(cg, "declare i8* @input_text()")
-    
+
+    /* 运行时初始化 */
+    codegenEmit(cg, "declare void @init_args(i32, i8**)")
+
     codegenEmit(cg, "")
 }
 
@@ -2654,6 +2697,11 @@
     /* 生成 main 包装 */
     emitMainWrapper(cg)
 
+    /* 追加延迟的字符串常量定义 */
+    若 cg.stringConstDefs != "" 则 {
+        cg.output = cg.output + "\n; === 字符串常量 ===\n" + cg.stringConstDefs
+    }
+
     打印("=== AST 遍历完成 ===")
     打印("共生成 ")
     打印(cg.funcCount)
@@ -2998,9 +3046,15 @@
                                         定义 可变 result: 文本
                                         result = codegen遍历表达式(cg, stmt)
                                     } 否则 {
-                                        若 stmt.kind == 18 则 {
-                                            /* 块语句 */
-                                            codegen遍历块语句(cg, stmt)
+                                        若 stmt.kind == 12 则 {
+                                            /* 函数调用作为语句（如 打印(...)） */
+                                            定义 可变 result: 文本
+                                            result = codegen遍历函数调用(cg, stmt.name, stmt.children)
+                                        } 否则 {
+                                            若 stmt.kind == 18 则 {
+                                                /* 块语句 */
+                                                codegen遍历块语句(cg, stmt)
+                                            }
                                         }
                                     }
                                 }
@@ -3036,16 +3090,19 @@
     否则 若 varTypeTag == "循环状态" 则 { slotCount = 2 }
 
     /* 分配所有槽位 */
+    /* 使用临时变量编号作为 LLVM 标识符，避免中文变量名问题 */
+    定义 可变 slotVar: 文本
+    slotVar = codegenNewTemp(cg)
     定义 可变 tmpPtr: 文本
-    tmpPtr = varName + "_slot"
+    tmpPtr = slotVar
     定义 可变 i: 整数
     i = 0
     当 i < slotCount 则 {
         定义 可变 slotName: 文本
         若 i == 0 则 {
-            slotName = varName + "_slot"
+            slotName = slotVar
         } 否则 {
-            slotName = varName + "_slot_" + 整数转文本(i)
+            slotName = slotVar + "_" + 整数转文本(i)
         }
         codegenEmit(cg, "  %" + slotName + " = alloca i64, align 8")
         i = i + 1
@@ -3472,7 +3529,7 @@
                     定义 可变 rightChild: AST节点
                     leftChild = 列表获取(expr.children, 0)
                     rightChild = 列表获取(expr.children, 1)
-                    result = codegen遍历二元表达式(cg, expr.value, leftChild, rightChild)
+                    result = codegen遍历二元表达式(cg, expr.name, leftChild, rightChild)
                 } 否则 {
                     /* 二元表达式子节点不足，返回默认值 */
                     result = codegenNewTemp(cg)
@@ -3484,7 +3541,7 @@
                     若 列表长度(expr.children) >= 1 则 {
                         定义 可变 operand: AST节点
                         operand = 列表获取(expr.children, 0)
-                        result = codegen遍历一元表达式(cg, expr.value, operand)
+                        result = codegen遍历一元表达式(cg, expr.name, operand)
                     } 否则 {
                         /* 一元表达式子节点不足，返回默认值 */
                         result = codegenNewTemp(cg)
@@ -3591,7 +3648,14 @@
 函数 codegen遍历标识符(cg: Codegen, name: 文本): 文本 {
     定义 可变 result: 文本
     result = codegenNewTemp(cg)
-    result = codegenNewTemp(cg)
+
+    /* 查找变量槽位名称（已在 codegen遍历变量定义 中生成） */
+    定义 可变 slotName: 文本
+    slotName = codegen查找变量(cg, name)
+    若 slotName == "" 则 {
+        /* 未找到槽位，回退使用 escapeLLVM标识符 + _slot */
+        slotName = escapeLLVM标识符(name) + "_slot"
+    }
 
     /* 查找变量类型 */
     定义 可变 varType: 文本
@@ -3600,10 +3664,10 @@
     /* 根据类型生成加载指令 */
     若 varType == "i8*" 则 {
         /* 指针类型（列表、字符串等）- 从 i8** 加载 */
-        codegenEmit(cg, "  %" + result + " = load i8*, i8** %" + name + "_slot")
+        codegenEmit(cg, "  %" + result + " = load i8*, i8** %" + slotName)
     } 否则 {
         /* 默认整数类型 - 从 i64* 加载 */
-        codegenEmit(cg, "  %" + result + " = load i64, i64* %" + name + "_slot")
+        codegenEmit(cg, "  %" + result + " = load i64, i64* %" + slotName)
     }
 
     返回 result
@@ -3624,7 +3688,7 @@
     定义 可变 i: 整数
     i = 0
     当 i < 文本长度(value) 则 {
-        若 value[i] == "\"" 则 {
+        若 value[i] == 34 则 {  /* 34 是双引号 " 的 ASCII/Unicode 码点 */
             是字符串 = 1
             跳出
         }
@@ -3633,7 +3697,7 @@
 
     若 是字符串 == 1 则 {
         /* 字符串字面量：创建全局字符串常量并返回指针 */
-        /* 去除引号 */
+        /* 去除引号，保留内部转义序列（LLVM IR 的 c"..." 原生支持 \n \t 等） */
         定义 可变 strContent: 文本
         strContent = ""
         i = 1
@@ -3642,15 +3706,25 @@
             i = i + 1
         }
 
-        /* 添加字符串常量到常量表 */
+        /* 生成字符串常量名 */
         定义 可变 constName: 文本
-        constName = codegen添加字符串常量(cg, strContent)
+        constName = "str"
+        定义 可变 idxStr: 文本
+        idxStr = 整数转文本(cg.stringConstCount)
+        constName = constName + idxStr
+        cg.stringConstCount = cg.stringConstCount + 1
+
+        定义 可变 len: 整数
+        len = 文本长度(strContent) + 1
+
+        /* 发射全局字符串常量定义到延迟缓冲区 */
+        定义 可变 constLine: 文本
+        constLine = "@" + constName + " = private constant [" + 整数转文本(len) + " x i8] c\"" + strContent + "\\00\"\n"
+        cg.stringConstDefs = cg.stringConstDefs + constLine
 
         /* 生成 getelementptr 获取字符串指针 */
         定义 可变 ptrResult: 文本
         ptrResult = codegenNewTemp(cg)
-        定义 可变 len: 整数
-        len = 文本长度(strContent) + 1
         codegenEmit(cg, "%" + ptrResult + " = getelementptr [" + 整数转文本(len) + " x i8], [" + 整数转文本(len) + " x i8]* @" + constName + ", i64 0, i64 0")
 
         返回 ptrResult
@@ -3694,13 +3768,13 @@
     若 op == "/" 则 { llOp = "sdiv"; resultType = "i64" }
     若 op == "%" 则 { llOp = "srem"; resultType = "i64" }
 
-    /* 关系运算符（返回 i1） */
-    若 op == "==" 则 { llOp = "icmp eq"; resultType = "i1" }
-    若 op == "!=" 则 { llOp = "icmp ne"; resultType = "i1" }
-    若 op == "<" 则 { llOp = "icmp slt"; resultType = "i1" }
-    若 op == ">" 则 { llOp = "icmp sgt"; resultType = "i1" }
-    若 op == "<=" 则 { llOp = "icmp sle"; resultType = "i1" }
-    若 op == ">=" 则 { llOp = "icmp sge"; resultType = "i1" }
+    /* 关系运算符（操作数为 i64，结果隐含为 i1） */
+    若 op == "==" 则 { llOp = "icmp eq"; resultType = "i64" }
+    若 op == "!=" 则 { llOp = "icmp ne"; resultType = "i64" }
+    若 op == "<" 则 { llOp = "icmp slt"; resultType = "i64" }
+    若 op == ">" 则 { llOp = "icmp sgt"; resultType = "i64" }
+    若 op == "<=" 则 { llOp = "icmp sle"; resultType = "i64" }
+    若 op == ">=" 则 { llOp = "icmp sge"; resultType = "i64" }
 
     /* 逻辑运算符（返回 i1） */
     若 op == "&&" 则 { llOp = "and"; resultType = "i1" }
@@ -3769,9 +3843,9 @@
     } 否则 若 funcName == "列表设置" 则 {
         映射后的函数名 = "rt_list_set"
     } 否则 若 funcName == "打印" 则 {
-        映射后的函数名 = "rt_print"
+        映射后的函数名 = "print"
     } 否则 若 funcName == "打印整数" 则 {
-        映射后的函数名 = "rt_print_int"
+        映射后的函数名 = "print_int"
     } 否则 若 funcName == "输入整数" 则 {
         映射后的函数名 = "rt_input_int"
     } 否则 若 funcName == "输入文本" 则 {
@@ -4065,8 +4139,8 @@
         返回 "i64"
     }
 
-    /* rt_print_int(i64) - 整数参数 */
-    若 funcName == "rt_print_int" 则 {
+    /* print_int(i64) - 整数参数 */
+    若 funcName == "print_int" || funcName == "rt_print_int" 则 {
         返回 "i64"
     }
 
