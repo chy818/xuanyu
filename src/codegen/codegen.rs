@@ -43,6 +43,8 @@ pub struct CodeGenerator {
     loop_label_stack: Vec<(usize, usize)>,
     /// 结构体字段偏移映射（结构体名 -> [(字段名, 偏移量, LLVM类型)]）
     struct_field_layouts: HashMap<String, Vec<(String, i32, String)>>,
+    /// 结构体中声明为列表类型的字段名集合（用于索引访问区分列表/字符串）
+    list_typed_fields: HashSet<String>,
     /// 枚举值映射（枚举成员名 -> 整数值）
     enum_values: HashMap<String, i64>,
     /// 枚举类型集合（记录哪些类型是枚举）
@@ -76,6 +78,7 @@ impl CodeGenerator {
             current_function_return_is_aggregate: false,
             loop_label_stack: Vec::new(),
             struct_field_layouts: HashMap::new(),
+            list_typed_fields: HashSet::new(),
             enum_values: HashMap::new(),
             enum_types: HashSet::new(),
             generated_functions: HashSet::new(),
@@ -709,6 +712,9 @@ impl CodeGenerator {
                 },
                 Type::Void | Type::Unknown | Type::TypeVar(_) => ("i64".to_string(), 8),
             };
+            if matches!(field.field_type, Type::List(_) | Type::Array(_)) {
+                self.list_typed_fields.insert(field.name.clone());
+            }
             fields.push((field.name.clone(), offset, llvm_type));
             offset += field_size;
         }
@@ -1585,8 +1591,8 @@ impl CodeGenerator {
                     _ => return Err(CodegenError::new("无限循环的body必须是BlockStmt")),
                 }
                 self.emit(&format!("    br label %L{}", loop_body));
+                // 循环结束标签即跳出目标，后续代码直接在标签后生成
                 self.emit(&format!("L{}:", loop_end));
-                self.emit("    unreachable");
 
                 // 弹出循环标签栈
                 self.loop_label_stack.pop();
@@ -2059,15 +2065,15 @@ impl CodeGenerator {
 
                 if object_type == "i8*" {
                     // 区分字符串索引（char access）和列表索引（element access）
-                    // 检查是否是已知的列表字段或列表变量
+                    // 先依据结构体中声明的字段类型判断是否为列表，再回退到名字启发式
                     let is_list = match &*index_access.object {
                         Expr::MemberAccess(member) => {
-                            // p.tokens[pos] — struct field access
                             let field_name = &member.member;
-                            // fields named "tokens", "children", "items", "elements" etc are lists
-                            field_name == "tokens" || field_name == "children" ||
-                            field_name == "items" || field_name == "errors" ||
-                            field_name.ends_with("列表")
+                            let declared_list = self.list_typed_fields.contains(field_name);
+                            let name_hint = field_name == "tokens" || field_name == "children" ||
+                                field_name == "items" || field_name == "errors" ||
+                                field_name.ends_with("列表");
+                            declared_list || name_hint
                         }
                         Expr::Identifier(ident) => {
                             // variable name ending in "s" might be a list, but be conservative
@@ -3296,7 +3302,26 @@ impl CodeGenerator {
             Expr::IndexAccess(index_access) => {
                 let object_type = self.infer_expression_type(&index_access.object);
                 if object_type == "i8*" {
-                    "i64".to_string()
+                    // 区分列表/字符串索引：列表元素类型推断为 i8*，字符串索引为字符 i64
+                    let is_list = match &*index_access.object {
+                        Expr::MemberAccess(member) => {
+                            let field_name = &member.member;
+                            let declared_list = self.list_typed_fields.contains(field_name);
+                            let name_hint = field_name == "tokens" || field_name == "children" ||
+                                field_name == "items" || field_name == "errors" ||
+                                field_name.ends_with("列表");
+                            declared_list || name_hint
+                        }
+                        Expr::Identifier(ident) => {
+                            ident.name.ends_with("s") || ident.name.contains("列表")
+                        }
+                        _ => false,
+                    };
+                    if is_list {
+                        "i8*".to_string()
+                    } else {
+                        "i64".to_string()
+                    }
                 } else {
                     self.infer_expression_type(arg)
                 }
@@ -3565,6 +3590,29 @@ impl CodeGenerator {
             Expr::ListLiteral(_) => "i8*".to_string(),
             Expr::ListComprehension(_) => "i8*".to_string(),
             Expr::Lambda(_) => "i8*".to_string(),
+            Expr::IndexAccess(index_access) => {
+                let object_type = self.infer_expression_type(&index_access.object);
+                if object_type == "i8*" {
+                    // 列表元素类型推断为 i8*，字符串索引返回字符 i64
+                    let is_list = match &*index_access.object {
+                        Expr::MemberAccess(member) => {
+                            let field_name = &member.member;
+                            let declared_list = self.list_typed_fields.contains(field_name);
+                            let name_hint = field_name == "tokens" || field_name == "children" ||
+                                field_name == "items" || field_name == "errors" ||
+                                field_name.ends_with("列表");
+                            declared_list || name_hint
+                        }
+                        Expr::Identifier(ident) => {
+                            ident.name.ends_with("s") || ident.name.contains("列表")
+                        }
+                        _ => false,
+                    };
+                    if is_list { "i8*".to_string() } else { "i64".to_string() }
+                } else {
+                    "i64".to_string()
+                }
+            }
             _ => "i64".to_string(),
         }
     }

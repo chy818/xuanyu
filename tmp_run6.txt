@@ -1,0 +1,125 @@
+﻿DEBUG[涓籡: 杩涘叆涓诲嚱鏁?
+DEBUG[涓籡: 鍒濆鍖栧彉閲?
+DEBUG[涓籡: 鍙傛暟涓暟: 3
+DEBUG[涓籡: 鍙傛暟 1: .\tmp_utf8_test.xy
+DEBUG[涓籡: 鍙傛暟 2: --ir
+DEBUG: 婧愭枃浠惰矾寰? .\tmp_utf8_test.xy
+DEBUG: 鍑嗗璋冪敤缂栬瘧婧愭枃浠?
+DEBUG: 杩涘叆缂栬瘧婧愭枃浠跺嚱鏁?
+DEBUG: 鏂囦欢璇诲彇瀹屾垚锛岄暱搴? 95
+=== 璇嶆硶鍒嗘瀽 ===DEBUG 鎵ц璇嶆硶鍒嗘瀽: 婧愮爜闀垮害=95
+DEBUG lexerInit: 婧愮爜闀垮害=95
+DEBUG lexerInit: 璋冪敤鑾峰彇瀛楃
+DEBUG lexerInit: 褰撳墠瀛楃=20989
+DEBUG tokenize: lexerInit 瀹屾垚
+DEBUG tokenize: 鍒涘缓鍒楄〃瀹屾垚
+DEBUG lexerNextToken: 浣嶇疆=0 闀垮害=95 褰撳墠瀛楃=20989
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?0 缁撴潫=6 缁撴灉闀垮害=6 鍐呭:20989 135 189 25968 149 176 
+DEBUG Token: 绫诲瀷=3, 鍊?'鍑芥暟'
+DEBUG lexerNextToken: 浣嶇疆=6 闀垮害=95 褰撳墠瀛楃=32
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?7 缁撴潫=10 缁撴灉闀垮害=3 鍐呭:20027 184 187 
+DEBUG Token: 绫诲瀷=0, 鍊?'涓?
+DEBUG lexerNextToken: 浣嶇疆=10 闀垮害=95 褰撳墠瀛楃=40
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?10 缁撴潫=11 缁撴灉闀垮害=1 鍐呭:40 
+DEBUG Token: 绫诲瀷=5, 鍊?'('
+DEBUG lexerNextToken: 浣嶇疆=11 闀垮害=95 褰撳墠瀛楃=41
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?11 缁撴潫=12 缁撴灉闀垮害=1 鍐呭:41 
+DEBUG Token: 绫诲瀷=5, 鍊?')'
+DEBUG lexerNextToken: 浣嶇疆=12 闀垮害=95 褰撳墠瀛楃=58
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?12 缁撴潫=13 缁撴灉闀垮害=1 鍐呭:58 
+DEBUG Token: 绫诲瀷=5, 鍊?':'
+DEBUG lexerNextToken: 浣嶇疆=13 闀垮害=95 褰撳墠瀛楃=32
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?14 缁撴潫=20 缁撴灉闀垮害=6 鍐呭:25972 149 180 25968 149 176 
+DEBUG Token: 绫诲瀷=3, 鍊?'鏁存暟'
+DEBUG lexerNextToken: 浣嶇疆=20 闀垮害=95 褰撳墠瀛楃=32
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?21 缁撴潫=22 缁撴灉闀垮害=1 鍐呭:123 
+DEBUG Token: 绫诲瀷=5, 鍊?'{'
+DEBUG lexerNextToken: 浣嶇疆=22 闀垮害=95 褰撳墠瀛楃=10
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?27 缁撴潫=33 缁撴灉闀垮害=6 鍐呭:23450 174 154 20041 185 137 
+DEBUG Token: 绫诲瀷=3, 鍊?'瀹氫箟'
+DEBUG lexerNextToken: 浣嶇疆=33 闀垮害=95 褰撳墠瀛楃=32
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?34 缁撴潫=40 缁撴灉闀垮害=6 鍐呭:21487 143 175 21464 143 152 
+DEBUG Token: 绫诲瀷=3, 鍊?'鍙彉'
+DEBUG lexerNextToken: 浣嶇疆=40 闀垮害=95 褰撳墠瀛楃=32
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?41 缁撴潫=43 缁撴灉闀垮害=2 鍐呭:120 115 
+DEBUG Token: 绫诲瀷=0, 鍊?'xs'
+DEBUG lexerNextToken: 浣嶇疆=43 闀垮害=95 褰撳墠瀛楃=58
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?43 缁撴潫=44 缁撴灉闀垮害=1 鍐呭:58 
+DEBUG Token: 绫诲瀷=5, 鍊?':'
+DEBUG lexerNextToken: 浣嶇疆=44 闀垮害=95 褰撳墠瀛楃=32
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?45 缁撴潫=51 缁撴灉闀垮害=6 鍐呭:21015 136 151 34920 161 168 
+DEBUG Token: 绫诲瀷=3, 鍊?'鍒楄〃'
+DEBUG lexerNextToken: 浣嶇疆=51 闀垮害=95 褰撳墠瀛楃=32
+DEBUG Token: 绫诲瀷=10, 鍊?'='
+DEBUG lexerNextToken: 浣嶇疆=53 闀垮害=95 褰撳墠瀛楃=32
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?54 缁撴潫=60 缁撴灉闀垮害=6 鍐呭:21015 136 151 34920 161 168 
+DEBUG Token: 绫诲瀷=3, 鍊?'鍒楄〃'
+DEBUG lexerNextToken: 浣嶇疆=60 闀垮害=95 褰撳墠瀛楃=40
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?60 缁撴潫=61 缁撴灉闀垮害=1 鍐呭:40 
+DEBUG Token: 绫诲瀷=5, 鍊?'('
+DEBUG lexerNextToken: 浣嶇疆=61 闀垮害=95 褰撳墠瀛楃=41
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?61 缁撴潫=62 缁撴灉闀垮害=1 鍐呭:41 
+DEBUG Token: 绫诲瀷=5, 鍊?')'
+DEBUG lexerNextToken: 浣嶇疆=62 闀垮害=95 褰撳墠瀛楃=10
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?67 缁撴潫=69 缁撴灉闀垮害=2 鍐呭:120 115 
+DEBUG Token: 绫诲瀷=0, 鍊?'xs'
+DEBUG lexerNextToken: 浣嶇疆=69 闀垮害=95 褰撳墠瀛楃=46
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?69 缁撴潫=70 缁撴灉闀垮害=1 鍐呭:46 
+DEBUG Token: 绫诲瀷=5, 鍊?'.'
+DEBUG lexerNextToken: 浣嶇疆=70 闀垮害=95 褰撳墠瀛楃=36861
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?70 缁撴潫=76 缁撴灉闀垮害=6 鍐呭:36861 191 189 21152 138 160 
+DEBUG Token: 绫诲瀷=0, 鍊?'杩藉姞'
+DEBUG lexerNextToken: 浣嶇疆=76 闀垮害=95 褰撳墠瀛楃=40
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?76 缁撴潫=77 缁撴灉闀垮害=1 鍐呭:40 
+DEBUG Token: 绫诲瀷=5, 鍊?'('
+DEBUG lexerNextToken: 浣嶇疆=77 闀垮害=95 褰撳墠瀛楃=49
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?77 缁撴潫=78 缁撴灉闀垮害=1 鍐呭:49 
+DEBUG Token: 绫诲瀷=1, 鍊?'1'
+DEBUG lexerNextToken: 浣嶇疆=78 闀垮害=95 褰撳墠瀛楃=41
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?78 缁撴潫=79 缁撴灉闀垮害=1 鍐呭:41 
+DEBUG Token: 绫诲瀷=5, 鍊?')'
+DEBUG lexerNextToken: 浣嶇疆=79 闀垮害=95 褰撳墠瀛楃=10
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?84 缁撴潫=90 缁撴灉闀垮害=6 鍐呭:36820 191 148 22238 155 158 
+DEBUG Token: 绫诲瀷=3, 鍊?'杩斿洖'
+DEBUG lexerNextToken: 浣嶇疆=90 闀垮害=95 褰撳墠瀛楃=32
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?91 缁撴潫=92 缁撴灉闀垮害=1 鍐呭:48 
+DEBUG Token: 绫诲瀷=1, 鍊?'0'
+DEBUG lexerNextToken: 浣嶇疆=92 闀垮害=95 褰撳墠瀛楃=10
+DEBUG 鎻愬彇瀛愪覆: 寮€濮?93 缁撴潫=94 缁撴灉闀垮害=1 鍐呭:125 
+DEBUG Token: 绫诲瀷=5, 鍊?'}'
+DEBUG lexerNextToken: 浣嶇疆=94 闀垮害=95 褰撳墠瀛楃=10
+璇嶆硶鍒嗘瀽瀹屾垚锛屽叡 26 涓?TokenDEBUG: tokens list has 26 elements, ptr=P魐?
+DEBUG: 鍑嗗璋冪敤鎵ц璇硶鍒嗘瀽
+=== 璇硶鍒嗘瀽 ===DEBUG 鎵ц璇硶鍒嗘瀽: 璋冪敤 parser鍒嗘瀽TokensDEBUG parser鍏ュ彛: tokensPtr=P魐? srcLen=95
+DEBUG parseBlock: end, children=0
+DEBUG parser: pos=0 count=26
+DEBUG parser: about to peek
+DEBUG parser: peek done, type=3 value='鍑芥暟'
+DEBUG parser: entering loop
+DEBUG parser loop: tok=鍑芥暟 type=3
+DEBUG: calling parseFunction
+[PFUNC enter]
+[SIG enter]
+DEBUG parseBlock: end, children=0
+[SIG node created]
+[SIG about to peek func]
+[SIG peeked func] val=鍑芥暟
+[SIG consuming func]
+[SIG consumed func]
+[SIG before peek name] pos=1
+[SIG peeked name] val=涓?
+[SIG before )]
+[SIG after )]
+[SIG returning]
+[PFUNC sig done]
+[PARSEFUNC: peeked='{' type=5]
+[PARSEFUNC: calling parseBlock]
+[BLOCK ENTER]
+DEBUG parseBlock: end, children=0
+DEBUG parseBlock: start
+DEBUG parseBlock: first body tok='瀹氫箟' type=3
+DEBUG blk: tok=瀹氫箟 type=3
+DEBUG parseBlock: end, children=0
+DEBUG parseBlock: end, children=0
+DEBUG parseCall: tok=')' type=5 pos=15
+璇硶閿欒 (琛?, 鍒?4): 鍑芥暟璋冪敤鏈棴鍚堬紝鏈熸湜 ')'

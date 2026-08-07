@@ -6,6 +6,7 @@
 
 #[cfg(test)]
 mod codegen_tests {
+    use xuanyu::generate_ir;
     use xuanyu::lexer::lexer::Lexer;
     use xuanyu::parser::parser::Parser;
 
@@ -212,6 +213,17 @@ mod codegen_tests {
         let mut parser = Parser::new(tokens);
         
         assert!(parser.parse_expression().is_ok());
+    }
+
+    #[test]
+    fn test_method_call_list_append_codegen() {
+        let source = "函数 主(): 整数 { 定义 可变 xs: 列表 = 列表() xs.追加(1) 返回 0 }".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let module = parser.parse_module().unwrap();
+        let ir = generate_ir(&module).unwrap();
+
+        assert!(ir.contains("call void @rt_list_append"), "generated IR did not contain list append call:\n{}", ir);
     }
 
     #[test]

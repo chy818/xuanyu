@@ -2959,6 +2959,8 @@
  * 遍历语句
  */
 函数 codegen遍历语句(cg: Codegen, stmt: AST节点): 无返回 {
+    打印("DBG cg语句 kind=")
+    打印整数(stmt.kind)
     若 stmt.kind == 3 则 {
         /* 变量定义 */
         codegen遍历变量定义(cg, stmt)
@@ -3059,6 +3061,8 @@
         定义 可变 initVal: 文本
         initVal = codegen遍历表达式(cg, initNode)
         codegenEmit(cg, "  store i64 %" + initVal + ", i64* %" + tmpPtr)
+        打印("DBG cg变量定义 init完成 init=")
+        打印(initVal)
     }
 }
 
@@ -3448,6 +3452,8 @@
  * 遍历表达式
  */
 函数 codegen遍历表达式(cg: Codegen, expr: AST节点): 文本 {
+    打印("DBG ex表达")
+    打印整数(expr.kind)
     定义 可变 result: 文本
     result = ""
 
@@ -3488,6 +3494,8 @@
                     若 expr.kind == 12 则 {
                         /* 调用表达式 */
                         result = codegen遍历函数调用(cg, expr.name, expr.children)
+                        打印("DBG 12完成=")
+                        打印(result)
                     } 否则 {
                         若 expr.kind == 19 则 {
                             /* 赋值表达式 - 将右值存储到左边的变量槽或列表元素 */
@@ -3559,6 +3567,8 @@
                                 }
                             } 否则 {
                                 /* 默认: 返回临时变量 */
+                                打印("DBG 默认case kind=")
+                                打印整数(expr.kind)
                                 result = codegenNewTemp(cg)
                                 codegenEmit(cg, "  %" + result + " = add i64 0, 0")
                             }
@@ -3566,10 +3576,11 @@
                         }
                     }
                 }
-            }
+             }
         }
-    }
 
+    打印("DBG 表达返回=")
+    打印(result)
     返回 result
 }
 
@@ -3579,6 +3590,7 @@
  */
 函数 codegen遍历标识符(cg: Codegen, name: 文本): 文本 {
     定义 可变 result: 文本
+    result = codegenNewTemp(cg)
     result = codegenNewTemp(cg)
 
     /* 查找变量类型 */
@@ -3732,7 +3744,9 @@
  * 遍历函数调用
  * 注意：需要根据函数签名确定参数类型
  */
-函数 codegen遍历函数调用(cg: Codegen, funcName: 文本, args: AST节点): 文本 {
+函数 codegen遍历函数调用(cg: Codegen, funcName: 文本, args: 列表): 文本 {
+    打印("DBG codegen调用: ")
+    打印(funcName)
     定义 可变 result: 文本
     result = codegenNewTemp(cg)
 
@@ -3879,13 +3893,16 @@
     /* 处理函数参数 - 根据函数名确定参数类型 */
     定义 可变 argStr: 文本
     argStr = ""
-
-    若 args != 0 && 列表长度(args.children) > 0 则 {
+    打印("DBG 列表长度(args)=")
+    打印整数(列表长度(args))
+    若 列表长度(args) > 0 则 {
         定义 可变 i: 整数
         i = 0
-        当 i < 列表长度(args.children) 则 {
+        打印("DBG args长度=")
+        打印整数(列表长度(args))
+        当 i < 列表长度(args) 则 {
             定义 可变 argNode: AST节点
-            argNode = 列表获取(args.children, i)
+            argNode = 列表获取(args, i)
 
             /* 遍历参数表达式获取 SSA 值 */
             定义 可变 argValue: 文本

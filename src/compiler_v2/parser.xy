@@ -285,6 +285,21 @@
         返回 node
     }
 
+    /* 类型关键字作为构造函数: 列表(), 整数() 等（也用作标识符） */
+    若 tok.类型 == 3 则 {
+        node.kind = 13  // 标识符表达式
+        node.name = tok.值
+        node.value = tok.值
+        parserConsume(p)
+
+        /* 检查是否是函数调用 */
+        tok = parserPeekToken(p)
+        若 tok.值 == "(" 则 {
+            node = parseCall(p, node)
+        }
+        返回 node
+    }
+
     /* 左括号 - 括号表达式 */
     若 tok.值 == "(" 则 {
         parserConsume(p)
@@ -383,7 +398,10 @@
         返回 node
     }
 
-    返回 parsePrimary(p)
+    /* 先解析基本表达式，再处理后缀（调用、索引、字段访问） */
+    定义 可变 primary: AST节点
+    primary = parsePrimary(p)
+    返回 parsePostfix(p, primary)
 }
 
 /* 获取运算符优先级 */
@@ -636,6 +654,12 @@
 
     /* 消费 '定义' */
     若 tok.值 == "定义" 则 {
+        parserConsume(p)
+    }
+
+    /* 处理可选的 '可变' 关键字 */
+    tok = parserPeekToken(p)
+    若 tok.值 == "可变" 则 {
         parserConsume(p)
     }
 

@@ -193,6 +193,21 @@
         返回 node
     }
 
+    /* 类型关键字作为构造函数: 列表(), 整数() 等（也用作标识符） */
+    若 tok.类型 == 3 则 {
+        node.kind = 13  // 标识符表达式
+        node.name = tok.值
+        node.value = tok.值
+        p.pos = p.pos + 1
+
+        /* 检查是否是函数调用 */
+        tok = parserPeekToken(p)
+        若 tok.值 == "(" 则 {
+            node = parseCall(p, node)
+        }
+        返回 node
+    }
+
     /* 左括号 - 括号表达式 */
     若 tok.值 == "(" 则 {
         p.pos = p.pos + 1
@@ -236,6 +251,13 @@
     /* 循环解析参数 */
     循环 {
         tok = parserPeekToken(p)
+        打印("DEBUG parseCall: tok='")
+        打印(tok.值)
+        打印("' type=")
+        打印整数(tok.类型)
+        打印(" pos=")
+        打印整数(p.pos)
+        打印("\n")
 
         // 结束条件：遇到 )
         若 tok.值 == ")" 则 {
@@ -286,12 +308,15 @@
         定义 可变 operand: AST节点
         operand = parseUnary(p)
         定义 可变 node: AST节点
-        node = parserCreateNode(11, op, "", tok.行号)
-        node.children = operand
+         node = parserCreateNode(11, op, "", tok.行号)
+        列表追加(node.children, operand)
         返回 node
     }
 
-    返回 parsePrimary(p)
+    /* 先解析基本表达式，再处理后缀（调用、索引、字段访问） */
+    定义 可变 primary: AST节点
+    primary = parsePrimary(p)
+    返回 parsePostfix(p, primary)
 }
 
 /* 获取运算符优先级 */
@@ -337,9 +362,9 @@
         right = parseBinaryExpr(p, nextMinPriority)
 
         定义 可变 node: AST节点
-        node = parserCreateNode(10, op, "", tok.行号)
-        node.children = left
-        node.value = ""  // 第二个子节点
+         node = parserCreateNode(10, op, "", tok.行号)
+        列表追加(node.children, left)
+        列表追加(node.children, right)
 
         left = node
         tok = parserPeekToken(p)
@@ -411,10 +436,10 @@
         /* 获取字段名 */
         tok = parserPeekToken(p)
         若 tok.类型 == 0 则 {
-            node.kind = 23  // 结构体字段节点
-            node.name = tok.值
-            node.children = base
-            p.pos = p.pos + 1
+node.kind = 23  // 结构体字段节点
+ node.name = tok.值
+ 列表追加(node.children, base)
+ p.pos = p.pos + 1
         }
     }
 
@@ -550,6 +575,12 @@
         p.pos = p.pos + 1
     }
 
+    /* 处理可选的 '可变' 关键字 */
+    tok = parserPeekToken(p)
+    若 tok.值 == "可变" 则 {
+        p.pos = p.pos + 1
+    }
+
     /* 获取变量名 */
     tok = parserPeekToken(p)
     若 tok.类型 == 0 则 {
@@ -574,7 +605,7 @@
         /* 解析初始值表达式 */
         定义 可变 expr: AST节点
         expr = parseExpression(p)
-        node.children = expr  // 设置初始值作为子节点
+        列表追加(node.children, expr)  // 设置初始值作为子节点
     }
 
     返回 node
@@ -600,7 +631,7 @@
     若 tok.值 != "}" 则 {
         定义 可变 expr: AST节点
         expr = parseExpression(p)
-        node.children = expr  // 设置返回值作为子节点
+        列表追加(node.children, expr)  // 设置返回值作为子节点
     }
 
     返回 node
