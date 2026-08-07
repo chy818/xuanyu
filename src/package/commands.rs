@@ -130,7 +130,7 @@ impl PackageManager {
         let config = PackageConfig {
             package: PackageMetadata {
                 name: name.to_string(),
-                version: "0.1.0".to_string(),
+                version: "0.2.0-beta".to_string(),
                 edition: "2024".to_string(),
                 authors: vec!["作者名 <email@example.com>".to_string()],
                 description: format!("{} 项目", name),
@@ -450,7 +450,7 @@ target/
      * 显示版本
      */
     fn cmd_version(&mut self) -> Result<(), PackageError> {
-        println!("玄语包管理器 v0.1.0");
+        println!("玄语包管理器 v0.2.0-beta");
         Ok(())
     }
 }

@@ -265,7 +265,7 @@ impl Repl {
     fn print_welcome(&self) {
         println!();
         println!("╔═══════════════════════════════════════════════════════════╗");
-        println!("║                    玄语 REPL v0.1.0                        ║");
+        println!("║                    玄语 REPL v0.2.0-beta                   ║");
         println!("║              交互式编程环境 - 以中文，写世界                 ║");
         println!("╚═══════════════════════════════════════════════════════════╝");
         println!();
@@ -686,8 +686,8 @@ impl Repl {
                 println!("类型检查: {}", if self.config.type_check { "开启" } else { "关闭" });
             }
             ReplCommand::Version => {
-                println!("玄语 REPL v0.1.0");
-                println!("编译器版本: v0.1.0");
+                println!("玄语 REPL v0.2.0-beta");
+                println!("编译器版本: v0.2.0-beta");
                 println!("后端: LLVM");
             }
             ReplCommand::Shell(cmd) => {

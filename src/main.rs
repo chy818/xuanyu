@@ -887,7 +887,7 @@ fn update_cache(filename: &str, source: &str) -> Result<(), String> {
 }
 
 fn print_usage(program: &str) {
-    println!("CCAS 玄语编译器 (xuanyu) v0.1.0");
+    println!("CCAS 玄语编译器 (xuanyu) v0.2.0-beta");
     println!();
     println!("用法: {} <源文件> [选项]", program);
     println!("      {} repl [选项]", program);
