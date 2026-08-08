@@ -94,8 +94,9 @@ function Run-IntegrationTests {
         @{ Path = "tests\integration\control_flow_test.xy"; Name = "control_flow_test" },
         @{ Path = "tests\integration\list_test.xy"; Name = "list_test" },
         @{ Path = "tests\integration\match_test.xy"; Name = "match_test" },
+        @{ Path = "tests\integration\async_test.xy"; Name = "async_test" },
         @{ Path = "examples\hello.xy"; Name = "hello" }
-    )    
+    )
     foreach ($test in $testFiles) {
         $script:Total++
         $fullPath = Join-Path $ProjectRoot $test.Path
@@ -117,17 +118,6 @@ function Run-IntegrationTests {
         }
     }
 
-    # Expected-fail tests (recorded but non-blocking until async lands in v0.3.0)
-    $expectedFailFiles = @(
-        @{ Path = "tests\integration\async_test.xy"; Name = "async_test"; Todo = "v0.3.0 async state machine" }
-    )
-    foreach ($test in $expectedFailFiles) {
-        $fullPath = Join-Path $ProjectRoot $test.Path
-        if (Test-Path $fullPath) {
-            Write-Host "Skipping (expected-fail): $($test.Name) [TODO $($test.Todo)]" -ForegroundColor DarkYellow
-            $script:Skipped++
-        }
-    }
 }
 
 # Run bootstrap tests

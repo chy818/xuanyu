@@ -1,6 +1,6 @@
 [package]
 name = "xuanyu"
-version = "0.2.0-beta"
+version = "0.3.0-beta"
 edition = "2021"
 authors = ["玄语 Team <xuanyu@ccas.org>"]
 description = "玄语编译器 - A Chinese-based compiler infrastructure"

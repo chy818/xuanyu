@@ -1225,6 +1225,11 @@ impl SemanticAnalyzer {
                     _ => Ok(inner_type),
                 }
             }
+            Expr::Spawn(spawn_expr) => {
+                // Spawn 表达式：分析被启动的表达式，返回协程句柄 (i64)
+                let _ = self.analyze_expression(&spawn_expr.expr)?;
+                Ok(Type::Int)  // 协程句柄类型为 i64
+            }
             Expr::ListComprehension(comp) => {
                 // 分析迭代列表
                 let iterable_type = self.analyze_expression(&comp.iterable)?;
@@ -1375,6 +1380,10 @@ impl SemanticAnalyzer {
             Expr::Await(await_expr) => {
                 // Await 表达式：收集被等待表达式中的自由变量
                 self.collect_free_variables(&await_expr.expr, param_names, captured)
+            }
+            Expr::Spawn(spawn_expr) => {
+                // Spawn 表达式：收集被启动表达式中的自由变量
+                self.collect_free_variables(&spawn_expr.expr, param_names, captured)
             }
             Expr::Literal(_) => Ok(()),
         }

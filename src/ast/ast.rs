@@ -88,6 +88,14 @@ pub enum Expr {
     Await(AwaitExpr),
 
     /**
+     * Spawn 表达式
+     * 用于启动异步协程任务
+     * 例如: 启动 异步任务("任务一", 10)
+     * 或: 启动 计算()
+     */
+    Spawn(SpawnExpr),
+
+    /**
      * 括号表达式
      */
     Grouped(Box<Expr>),
@@ -107,6 +115,7 @@ impl ASTNode for Expr {
             Expr::ListComprehension(e) => e.span(),
             Expr::Lambda(e) => e.span(),
             Expr::Await(e) => e.span(),
+            Expr::Spawn(e) => e.span(),
             Expr::Grouped(e) => e.span(),
         }
     }
@@ -521,6 +530,43 @@ impl AwaitExpr {
 }
 
 impl ASTNode for AwaitExpr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/**
+ * Spawn 表达式
+ * 用于启动异步协程任务
+ *
+ * 语法:
+ * 启动 表达式
+ *
+ * 示例:
+ * 启动 异步任务("任务一", 10)
+ * 启动 计算()
+ */
+#[derive(Debug, Clone)]
+pub struct SpawnExpr {
+    /// 要启动的表达式 (通常是异步函数调用)
+    pub expr: Box<Expr>,
+    /// span 信息
+    pub span: Span,
+}
+
+impl SpawnExpr {
+    /**
+     * 创建新的 Spawn 表达式
+     */
+    pub fn new(expr: Expr, span: Span) -> Self {
+        Self {
+            expr: Box::new(expr),
+            span,
+        }
+    }
+}
+
+impl ASTNode for SpawnExpr {
     fn span(&self) -> Span {
         self.span
     }

@@ -1,22 +1,25 @@
-# 玄语编译器 v0.2.0-beta 发布说明
+# 玄语编译器 v0.3.0-beta 发布说明
 
-## 开发版更新（v0.3.0 准备期，未发布）
+## v0.3.0-beta 更新内容
 
-本段记录为 v0.3.0（模式匹配 / 异步 / 调试器 / 发布包）做准备的开发变更，尚未打版本号。
+本版本为 v0.3.0-beta，四大特性全部落地：模式匹配、异步编程、调试器、发布包。
 
 ### 新增
 - **模式匹配最小可用 codegen**：`匹配` 语句（枚举变体 `icmp eq` 判别链 + 字段绑定 + `默认` 分支）已可实现，配套 e2e 测试接入 CI
+- **异步编程完整落地**：`异步 函数` 修饰符 + `启动`/`等待` 表达式，协程包装器（`i64(i64)` ABI 适配）自动生成，runtime 协程调度器驱动执行，e2e 测试 (async_test.xy) 通过并接入 CI
 - **协程调度器原语（runtime）**：`rt_coro_spawn/resume/await/tick/run_all` 等 C 基座已加入 runtime.c，供异步状态机使用
 - **`等待` codegen 接线**：`Expr::Await` 从透传升级为调用 `rt_coro_await`（i64 协程句柄等待结果）
 - **调试器骨架**：CLI 新增 `--debug` 标志输出「源码行号 → 函数」映射；REPL 新增 `:断点`/`:继续`/`:单步` 命令占位
-- **发布打包脚本**：`build/release.ps1` 产出 `dist/xuanyu-<版本>/` 分发目录与 zip，含 xy / runtime.c / xyc.xy / 示例 / 文档 / VERSION，并在打包后自检
+- **调试器运行时断点陷阱**：`--debug` 模式注入 `rt_debug_trap` 调用，支持交互式单步(s)/继续(c)/退出(q)调试命令
+- **发布打包脚本**：`build/release.ps1`（Windows 本地）+ `build/release.sh`（三平台：Windows/Linux/macOS）产出 `dist/xuanyu-<版本>/` 分发目录与 zip/tar.gz，并在打包后自检
+- **CI 三平台覆盖**：e2e/自举/release job 覆盖 Windows/Linux/macOS；tag 推送 (`v*`) 触发三平台构建与 artifact 自动上传
 - **版本号统一**：新增 `version!()` 宏（读取 Cargo.toml），main / REPL / 包管理器统一使用，消除硬编码版本串
 
 ### 测试
 - lexer：新增 match/async 关键字与英文别名测试（32→22 结构重组，全绿）
 - parser：新增 match 语句（简单/字段绑定/默认/命名绑定）与 await（表达式/标识符/语句）测试（37 全绿）
 - codegen：新增 match 语句判别跳转与语法测试（26 全绿）
-- e2e：`tests/integration/match_test.xy` 通过并接入 CI；`tests/integration/async_test.xy` 标记预期失败（待 v0.3.0 状态机）
+- e2e：`tests/integration/match_test.xy` 通过并接入 CI；`tests/integration/async_test.xy`（异步 spawn/await）通过并接入 CI
 
 ### 修复
 - parser 兼容 `=>` 箭头 token（原 lexer 将 `=>` 生成为单个 `箭头` token，parser 曾期望 `>`+`=` 两个 token）

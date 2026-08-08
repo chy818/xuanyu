@@ -236,8 +236,13 @@ fn compile_single_file(filename: &str, mode: RunMode, debug: bool) -> Result<(),
         .and_then(|stem| stem.to_str())
         .unwrap_or("");
     
-    let ir = xuanyu::generate_ir_with_module_name(&ast, module_name)
-        .map_err(|e| format!("代码生成错误 [{}]: {}", e.code, e.message))?;
+    let ir = if debug {
+        xuanyu::generate_ir_debug(&ast, module_name, &[])
+            .map_err(|e| format!("代码生成错误 [{}]: {}", e.code, e.message))?
+    } else {
+        xuanyu::generate_ir_with_module_name(&ast, module_name)
+            .map_err(|e| format!("代码生成错误 [{}]: {}", e.code, e.message))?
+    };
 
     if mode != RunMode::IrPure {
         println!("代码生成完成");
@@ -459,6 +464,12 @@ fn update_expr_function_names(expr: &mut Expr, module_name: &str, func_names: &[
                 update_expr_function_names(cond, module_name, func_names);
             }
         }
+        Expr::Await(await_expr) => {
+            update_expr_function_names(&mut await_expr.expr, module_name, func_names);
+        }
+        Expr::Spawn(spawn_expr) => {
+            update_expr_function_names(&mut spawn_expr.expr, module_name, func_names);
+        }
         _ => {}
     }
 }
@@ -666,8 +677,13 @@ fn compile_multi_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), 
 
     // 一次性生成合并后的 IR
     // 使用主模块名作为模块名前缀，确保生成的函数名唯一
-    let combined_ir = xuanyu::generate_ir_with_module_name(&merged_module, module_name)
-        .map_err(|e| format!("代码生成错误: {}", e.message))?;
+    let combined_ir = if debug {
+        xuanyu::generate_ir_debug(&merged_module, module_name, &[])
+            .map_err(|e| format!("代码生成错误: {}", e.message))?
+    } else {
+        xuanyu::generate_ir_with_module_name(&merged_module, module_name)
+            .map_err(|e| format!("代码生成错误: {}", e.message))?
+    };
 
     if mode != RunMode::IrPure {
         println!("\n=== 代码生成 ===");

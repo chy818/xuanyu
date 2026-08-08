@@ -53,6 +53,14 @@ pub struct CodeGenerator {
     module_name: String,
     /// 延迟生成的 lambda 函数定义（在模块级别生成，不能嵌套在函数内）
     lambda_defs: Vec<String>,
+    /// 协程包装器 IR（异步函数包装器，在模块级别生成）
+    coro_wrappers: Vec<String>,
+    /// 异步函数参数信息（原始函数名 -> (mangled名称, [(LLVM类型, 参数名)])）
+    async_func_info: HashMap<String, (String, Vec<(String, String)>)>,
+    /// 调试模式（--debug 标志启用时，在每个语句前注入 rt_debug_trap）
+    pub debug_mode: bool,
+    /// 调试断点行号集合（由 CLI 设置，供 trap 注入使用）
+    pub debug_breakpoints: Vec<usize>,
 }
 
 impl CodeGenerator {
@@ -81,6 +89,10 @@ impl CodeGenerator {
             func_name_mapping: HashMap::new(),
             module_name: String::new(),
             lambda_defs: Vec::new(),
+            coro_wrappers: Vec::new(),
+            async_func_info: HashMap::new(),
+            debug_mode: false,
+            debug_breakpoints: Vec::new(),
         }
     }
 
@@ -130,6 +142,8 @@ impl CodeGenerator {
         self.struct_field_layouts.clear();
         self.generated_functions.clear();
         self.enum_values.clear();
+        self.coro_wrappers.clear();
+        self.async_func_info.clear();
 
         // 注册结构体字段布局（在生成函数之前）
         for struct_def in &module.structs {
@@ -166,6 +180,18 @@ impl CodeGenerator {
 
         // 生成运行时库函数声明（跳过已在外部函数声明中定义的）
         self.emit_runtime_declarations();
+
+        // 预注册异步函数的参数信息（需要在生成函数前，因为类型定义需提前）
+        for func in &module.functions {
+            if func.is_async {
+                self.register_async_func_info(func);
+            }
+        }
+
+        // 预先发射异步参数结构体类型定义（函数体中使用这些类型）
+        if !self.async_func_info.is_empty() {
+            self.emit_async_struct_types();
+        }
 
         // 预先收集用户函数签名（用于类型推断）
         // 同时预先生成函数名映射，确保函数调用时能找到正确的带参数类型的函数名
@@ -230,10 +256,24 @@ impl CodeGenerator {
             self.emit("; === Lambda 定义结束 ===\n");
         }
 
+        // 生成协程包装器（异步函数 -> i64(i64) ABI 适配）
+        if !self.async_func_info.is_empty() {
+            self.emit_async_wrappers();
+        }
+
         // 如果存在 XY 主函数，生成 C 兼容的 main 包装器
         if has_xy_main {
             self.emit("\ndefine i32 @main(i32 %argc, i8** %argv) {");
             self.emit("    call void @init_args(i32 %argc, i8** %argv)");
+
+            // 调试模式：初始化调试器
+            if self.debug_mode {
+                self.emit("    call void @rt_debug_init()");
+                let bps = self.debug_breakpoints.clone();
+                for bp in &bps {
+                    self.emit(&format!("    call void @rt_debug_add_breakpoint(i64 {})", bp));
+                }
+            }
 
             // 根据主函数的参数数量生成调用
             let main_func = module.functions.iter()
@@ -633,6 +673,11 @@ impl CodeGenerator {
         emit_if_new(&mut self.ir, "declare i64 @rt_coro_await(i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i64 @rt_coro_tick()", extern_funcs);
         emit_if_new(&mut self.ir, "declare void @rt_coro_run_all()", extern_funcs);
+
+        // 调试器陷阱（--debug 模式运行时调试支持）
+        emit_if_new(&mut self.ir, "declare void @rt_debug_init()", extern_funcs);
+        emit_if_new(&mut self.ir, "declare void @rt_debug_add_breakpoint(i64)", extern_funcs);
+        emit_if_new(&mut self.ir, "declare void @rt_debug_trap(i64, i8*)", extern_funcs);
 
         // 字符串比较函数
         emit_if_new(&mut self.ir, "declare i64 @rt_str_eq(i8*, i8*)", extern_funcs);
@@ -1058,6 +1103,12 @@ impl CodeGenerator {
      * 生成语句
      */
     fn generate_statement(&mut self, stmt: &Stmt) -> Result<(), CodegenError> {
+        // 调试模式：在每条语句前注入断点陷阱
+        if self.debug_mode {
+            let line = stmt.span().start_line as i64;
+            let func_name = self.current_function_name.clone();
+            self.emit_debug_trap(line, &func_name);
+        }
         match stmt {
             Stmt::Let(let_stmt) => {
                 self.generate_let_stmt(let_stmt)?;
@@ -1967,6 +2018,11 @@ impl CodeGenerator {
                     // 非 i64 句柄（如文本/Future 描述），暂透传
                     Ok(inner_val)
                 }
+            }
+            Expr::Spawn(spawn_expr) => {
+                // Spawn 表达式：启动异步协程任务
+                // 解析被启动的表达式（必须是函数调用）
+                self.generate_spawn_expr(spawn_expr)
             }
             Expr::ListLiteral(list) => {
                 // 创建列表
@@ -3738,6 +3794,7 @@ impl CodeGenerator {
             }
             Expr::Grouped(expr) => self.infer_expression_type(expr),
             Expr::Await(await_expr) => self.infer_expression_type(&await_expr.expr),
+            Expr::Spawn(_) => "i64".to_string(),  // 协程句柄为 i64
             Expr::ListLiteral(_) => "i8*".to_string(),
             Expr::ListComprehension(_) => "i8*".to_string(),
             Expr::Lambda(_) => "i8*".to_string(),
@@ -3765,6 +3822,211 @@ impl CodeGenerator {
                 }
             }
         }
+    }
+
+    /**
+     * 生成 Spawn 表达式（启动 异步函数(...)）
+     *
+     * 策略：
+     * 1. 解析函数调用参数
+     * 2. 分配参数结构体（alloca）并存储各参数值
+     * 3. 将结构体指针转为 i64，调用 rt_coro_spawn(包装器指针, 参数指针)
+     * 4. 返回协程句柄 (i64)
+     */
+    fn generate_spawn_expr(&mut self, spawn_expr: &SpawnExpr) -> Result<String, CodegenError> {
+        // 提取被启动的函数调用
+        let call_expr = match spawn_expr.expr.as_ref() {
+            Expr::Call(call) => call,
+            other => {
+                // 非函数调用：生成表达式值，作为"直接结果"返回
+                // 此时不通过协程，直接透传
+                let val = self.generate_expression(other)?;
+                return Ok(val);
+            }
+        };
+
+        // 查找目标函数（使用 AST 中的函数名，已包含模块前缀如 "async_test::异步任务"）
+        let func_name = match call_expr.function.as_ref() {
+            Expr::Identifier(id) => id.name.clone(),
+            _ => {
+                return Err(CodegenError::new("启动表达式只能用于函数调用"));
+            }
+        };
+
+        // 获取异步函数的参数信息
+        let (mangled_func_name, param_info) = match self.async_func_info.get(&func_name) {
+            Some(info) => info.clone(),
+            None => {
+                return Err(CodegenError::new(
+                    &format!("启动表达式只能用于异步函数，但 '{}' 不是异步函数（请使用 '异步 函数' 声明）", func_name)
+                ));
+            }
+        };
+
+        // 生成各参数的值
+        let mut arg_vals: Vec<String> = Vec::new();
+        let mut arg_types: Vec<String> = Vec::new();
+        for arg in &call_expr.arguments {
+            let val = self.generate_expression(arg)?;
+            let ty = self.infer_expression_type(arg);
+            arg_vals.push(val);
+            arg_types.push(ty);
+        }
+
+        // 如果没有参数，直接生成 spawn 调用（arg = 0）
+        if param_info.is_empty() && arg_vals.is_empty() {
+            let wrapper_name = format!("{}_coro_wrapper", mangled_func_name);
+            let fn_ptr = self.new_label("fn_ptr");
+            // bitcast 函数指针为 i8* 以匹配 rt_coro_spawn 声明
+            self.emit(&format!("    %{} = bitcast i64 (i64)* @{} to i8*", fn_ptr, wrapper_name));
+            let handle = self.new_label("coro_handle");
+            self.emit(&format!("    %{} = call i64 @rt_coro_spawn(i8* %{}, i64 0)", handle, fn_ptr));
+            self.variable_types.insert(handle.clone(), "i64".to_string());
+            return Ok(handle);
+        }
+
+        // 有参数：分配参数结构体
+        let struct_type_name = format!("%async_args_{}", mangled_func_name);
+        let struct_ptr = self.new_label("args_ptr");
+        self.emit(&format!("    %{} = alloca {}, align 8", struct_ptr, struct_type_name));
+
+        // 存储各参数到结构体
+        for (i, ((llvm_type, _param_name), arg_val)) in param_info.iter().zip(arg_vals.iter()).enumerate() {
+            let field_ptr = self.new_label("field_ptr");
+            self.emit(&format!("    %{} = getelementptr {}, {}* %{}, i32 0, i32 {}",
+                field_ptr, struct_type_name, struct_type_name, struct_ptr, i));
+            self.emit(&format!("    store {} %{}, {}* %{}", llvm_type, arg_val, llvm_type, field_ptr));
+        }
+
+        // 结构体指针转 i64
+        let args_i64 = self.new_label("args_i64");
+        self.emit(&format!("    %{} = ptrtoint {}* %{} to i64", args_i64, struct_type_name, struct_ptr));
+
+        // 获取包装器函数指针
+        let wrapper_name = format!("{}_coro_wrapper", mangled_func_name);
+        let fn_ptr = self.new_label("fn_ptr");
+        self.emit(&format!("    %{} = bitcast i64 (i64)* @{} to i8*", fn_ptr, wrapper_name));
+
+        // 调用 rt_coro_spawn
+        let handle = self.new_label("coro_handle");
+        self.emit(&format!("    %{} = call i64 @rt_coro_spawn(i8* %{}, i64 %{})", handle, fn_ptr, args_i64));
+        self.variable_types.insert(handle.clone(), "i64".to_string());
+
+        Ok(handle)
+    }
+
+    /**
+     * 注册异步函数的参数信息
+     */
+    fn register_async_func_info(&mut self, func: &Function) {
+        let base_func_name = self.translate_def_name(&func.name);
+        let param_types: Vec<String> = func.params
+            .iter()
+            .map(|param| self.translate_type(&param.param_type))
+            .collect();
+        // 构建 mangled 函数名
+        let sanitized_types: Vec<String> = param_types
+            .iter()
+            .map(|t| {
+                let mut simplified = t.clone();
+                if simplified.starts_with("%struct.") {
+                    simplified = simplified.trim_start_matches("%struct.").to_string();
+                }
+                simplified.replace("*", "ptr").replace("%", "struct_").replace(".", "_")
+            })
+            .collect();
+        let param_suffix = sanitized_types.join("_");
+        let mut mangled_name = if param_suffix.is_empty() {
+            base_func_name.clone()
+        } else {
+            format!("{}_{}", base_func_name, param_suffix)
+        };
+        if !self.module_name.is_empty() && !mangled_name.starts_with("xy_main")
+            && !CodeGenerator::is_builtin_func(&mangled_name)
+        {
+            mangled_name = format!("{}_module_{}", self.module_name, mangled_name);
+        }
+        // 记录参数信息 (LLVM类型, 参数名)
+        let param_info: Vec<(String, String)> = func.params.iter()
+            .zip(param_types.iter())
+            .map(|(p, t)| (t.clone(), p.name.clone()))
+            .collect();
+        self.async_func_info.insert(func.name.clone(), (mangled_name.clone(), param_info));
+    }
+
+    /**
+     * 提前发射异步参数结构体类型定义（必须在函数体使用之前）
+     */
+    fn emit_async_struct_types(&mut self) {
+        self.emit("\n; === 异步参数结构体类型定义 ===\n");
+        let info = self.async_func_info.clone();
+        for (_orig_name, (mangled_name, param_info)) in &info {
+            if param_info.is_empty() {
+                continue;
+            }
+            let struct_type_name = format!("%async_args_{}", mangled_name);
+            let field_types: Vec<&str> = param_info.iter().map(|(t, _)| t.as_str()).collect();
+            self.emit(&format!("{} = type {{ {} }}", struct_type_name, field_types.join(", ")));
+        }
+        self.emit("; === 异步参数类型定义结束 ===\n");
+    }
+
+    /**
+     * 生成所有异步函数的协程包装器
+     *
+     * 每个包装器将 i64 参数（指向参数结构体的指针）解包,
+     * 调用真实函数, 并返回结果。
+     * 签名统一为 i64 (i64)，匹配 runtime 协程 ABI。
+     */
+    fn emit_async_wrappers(&mut self) {
+        self.emit("\n; === 协程包装器 (Async Wrappers) ===\n");
+
+        for (orig_name, (mangled_name, param_info)) in &self.async_func_info.clone() {
+            if param_info.is_empty() {
+                // 无参数：生成简单包装器（忽略 arg，直接调用）
+                let wrapper_name = format!("{}_coro_wrapper", mangled_name);
+                self.emit(&format!("define i64 @{}(i64 %args_ptr) {{", wrapper_name));
+                self.emit(&format!("    %result = call i64 @{}( )", mangled_name));
+                self.emit("    ret i64 %result");
+                self.emit("}\n");
+                continue;
+            }
+
+            let struct_type_name = format!("%async_args_{}", mangled_name);
+
+            // 生成包装器函数
+            let wrapper_name = format!("{}_coro_wrapper", mangled_name);
+            self.emit(&format!("define i64 @{}(i64 %args_ptr) {{", wrapper_name));
+
+            // inttoptr 将 i64 转换回结构体指针
+            let ptr_name = format!("%args_struct_{}", Self::sanitize_identifier(orig_name));
+            self.emit(&format!("    {} = inttoptr i64 %args_ptr to {}*", ptr_name, struct_type_name));
+
+            // GEP + load 每个参数
+            let mut loaded_args: Vec<(String, String)> = Vec::new();  // (val, type)
+            for (i, (llvm_type, param_name)) in param_info.iter().enumerate() {
+                let field_ptr = format!("%gep_{}", Self::sanitize_identifier(param_name));
+                self.emit(&format!("    {} = getelementptr {}, {}* {}, i32 0, i32 {}",
+                    field_ptr, struct_type_name, struct_type_name, ptr_name, i));
+                let loaded_val = format!("%arg_{}", Self::sanitize_identifier(param_name));
+                self.emit(&format!("    {} = load {}, {}* {}",
+                    loaded_val, llvm_type, llvm_type, field_ptr));
+                loaded_args.push((loaded_val, llvm_type.clone()));
+            }
+
+            // 构建调用参数列表（val 已含 % 前缀）
+            let call_arg_strs: Vec<String> = loaded_args.iter()
+                .map(|(val, ty)| format!("{} {}", ty, val))
+                .collect();
+            let call_args = call_arg_strs.join(", ");
+
+            // 调用真实函数
+            self.emit(&format!("    %result = call i64 @{}({})", mangled_name, call_args));
+            self.emit("    ret i64 %result");
+            self.emit("}\n");
+        }
+
+        self.emit("; === 协程包装器结束 ===\n");
     }
 
     /**
@@ -4227,6 +4489,38 @@ impl CodeGenerator {
     }
 
     /**
+     * 在调试模式下注入断点陷阱调用
+     * 在每条语句执行前调用 rt_debug_trap(行号, 函数名)
+     */
+    fn emit_debug_trap(&mut self, line: i64, func_name: &str) {
+        // 获取或创建函数名字符串常量
+        let str_label = format!("debug_fn_{}", Self::sanitize_identifier(func_name));
+        // 包含 null 终止符的完整字符串
+        let full_name = format!("{}\0", func_name);
+        let escaped_name = self.escape_string_for_llvm(&full_name);
+        // 确保字符串常量存在（去重）
+        let byte_len = func_name.len() + 1;  // +1 for null terminator
+        let const_def = format!(
+            "@{} = private constant [{} x i8] c\"{}\"",
+            str_label,
+            byte_len,
+            escaped_name
+        );
+        if !self.string_constants.contains(&const_def) {
+            self.string_constants.push(const_def);
+        }
+        // 发射 debug trap 调用
+        let byte_len = func_name.len() + 1;  // +1 for null terminator
+        self.emit(&format!(
+            "    call void @rt_debug_trap(i64 {}, i8* getelementptr inbounds ([{} x i8], [{} x i8]* @{}, i32 0, i32 0))",
+            line,
+            byte_len,
+            byte_len,
+            str_label
+        ));
+    }
+
+    /**
      * 输出IR代码
      */
     fn emit(&mut self, code: &str) {
@@ -4245,5 +4539,13 @@ pub fn generate_ir(module: &Module) -> Result<String, CodegenError> {
 
 pub fn generate_ir_with_module_name(module: &Module, module_name: &str) -> Result<String, CodegenError> {
     let mut generator = CodeGenerator::with_module_name(module_name);
+    generator.generate(module)
+}
+
+/// 生成 IR（调试模式：注入断点陷阱）
+pub fn generate_ir_debug(module: &Module, module_name: &str, breakpoints: &[usize]) -> Result<String, CodegenError> {
+    let mut generator = CodeGenerator::with_module_name(module_name);
+    generator.debug_mode = true;
+    generator.debug_breakpoints = breakpoints.to_vec();
     generator.generate(module)
 }

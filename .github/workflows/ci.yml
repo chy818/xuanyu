@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master, main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -10,8 +11,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ============================================================
+  # Job 1: Rust 单元/集成测试 (单平台即可，重在快速反馈)
+  # ============================================================
   rust-tests:
-    name: Rust 单元/集成测试
+    name: Rust 测试
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,13 +38,19 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
         continue-on-error: true
 
+  # ============================================================
+  # Job 2: XY 端到端编译 (三平台矩阵)
+  # ============================================================
   xy-e2e:
-    name: XY 端到端编译
+    name: XY e2e (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -57,15 +67,22 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install llvm clang
 
+      - name: 安装 LLVM (Windows)
+        if: runner.os == 'Windows'
+        run: choco install llvm -y
+
       - name: 构建编译器
         run: cargo build --release
 
       - name: 编译并运行集成测试
         run: |
           set -e
-          XY=target/release/xy
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            XY=target/release/xy.exe
+          else
+            XY=target/release/xy
+          fi
 
-          # 运行并捕获输出，验证功能行为（剥离尾部求和分划线，仅保留程序输出）
           run_xy() {
             local file="$1"; local expect="$2"
             local out
@@ -83,11 +100,16 @@ jobs:
           run_xy tests/integration/operator_test.xy "$(printf '=== 运算符测试 ===\n13\n7\n30\n3\n1')"
           run_xy tests/integration/control_flow_test.xy "$(printf '=== 控制流测试 ===\n良好\n15')"
           run_xy tests/integration/match_test.xy "$(printf '红色1')"
+          run_xy tests/integration/async_test.xy "$(printf '265')"
 
       - name: 宏展开端到端验证
         run: |
           set -e
-          XY=target/release/xy
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            XY=target/release/xy.exe
+          else
+            XY=target/release/xy
+          fi
           out=$("$XY" tests/fixtures/test_macro/macro.xy --run 2>&1 | sed -n '/--- 运行结果 ---/,$p' | tail -n +2 | sed 's/^-----*$//')
           expect="$(printf '42你好，玄语！')"
           if [ "$out" != "$expect" ]; then
@@ -98,19 +120,34 @@ jobs:
           fi
           echo "PASS: macro e2e"
 
+  # ============================================================
+  # Job 3: 自举测试 (Linux + Windows)
+  # ============================================================
   bootstrap:
-    name: 自举测试
-    runs-on: ubuntu-latest
+    name: 自举测试 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: 安装 LLVM
+      - name: 安装 LLVM (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm clang
+
+      - name: 安装 LLVM (Windows)
+        if: runner.os == 'Windows'
+        run: choco install llvm -y
 
       - name: 构建编译器
         run: cargo build --release
@@ -118,7 +155,11 @@ jobs:
       - name: 编译 L2 自举源码 (IR 生成验证)
         run: |
           set -e
-          XY=target/release/xy
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            XY=target/release/xy.exe
+          else
+            XY=target/release/xy
+          fi
           for f in src/compiler_v2/xyc.xy src/compiler_v2/lexer_s.xy \
                    src/compiler_v2/parser_s.xy src/compiler_v2/sema_s.xy \
                    tests/bootstrap/self_compile_test.xy; do
@@ -129,5 +170,72 @@ jobs:
       - name: 多文件模块编译验证
         run: |
           set -e
-          target/release/xy tests/fixtures/test_multi/main.xy --ir-pure > /dev/null 2>&1
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            XY=target/release/xy.exe
+          else
+            XY=target/release/xy
+          fi
+          "$XY" tests/fixtures/test_multi/main.xy --ir-pure > /dev/null 2>&1
           echo "MULTI-MODULE-PASS"
+
+  # ============================================================
+  # Job 4: 发布打包 (三平台，仅 tag 触发)
+  # ============================================================
+  release:
+    name: 发布打包 (${{ matrix.os }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 LLVM (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+
+      - name: 安装 LLVM (macOS)
+        if: runner.os == 'macOS'
+        run: brew install llvm clang
+
+      - name: 安装 LLVM (Windows)
+        if: runner.os == 'Windows'
+        run: choco install llvm -y
+
+      - name: 构建发布包
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "Building release for version: $VERSION on $RUNNER_OS"
+          bash build/release.sh "$VERSION"
+
+      - name: 确定制品文件名
+        id: artifact_name
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: 上传 artifact (Linux/macOS tar.gz)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xuanyu-${{ runner.os }}-${{ github.ref_name }}
+          path: dist/xuanyu-*.tar.gz
+          if-no-files-found: error
+
+      - name: 上传 artifact (Windows zip)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xuanyu-Windows-${{ github.ref_name }}
+          path: dist/xuanyu-*.zip
+          if-no-files-found: error

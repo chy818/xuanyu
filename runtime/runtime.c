@@ -1106,4 +1106,87 @@ void rt_coro_run_all(void) {
     }
 }
 
+/* ================================================================
+ * 调试器陷阱（v0.3.0 最小版运行时调试支持）
+ * ----------------------------------------------------------------
+ * 编译时在 --debug 模式下，codegen 在每个语句前注入
+ * call @rt_debug_trap(line, func_name)，运行时通过 stdin
+ * 接收调试命令（继续/单步/退出）。
+ * ================================================================ */
+
+#include <stdint.h>
+
+/* 调试模式是否启用（由 codegen 在 main 前调用 rt_debug_init 设置） */
+static int g_debug_enabled = 0;
+/* 是否单步模式（每行都停下） */
+static int g_debug_step_mode = 0;
+/* 断点行号集合（最多 64 个断点） */
+static int64_t g_breakpoints[64];
+static int g_breakpoint_count = 0;
+
+/* 启用调试模式 */
+void rt_debug_init(void) {
+    g_debug_enabled = 1;
+    g_debug_step_mode = 1;  /* 默认进入单步模式，在第一条语句处停下 */
+}
+
+/* 添加断点 */
+void rt_debug_add_breakpoint(int64_t line) {
+    if (g_breakpoint_count < 64) {
+        g_breakpoints[g_breakpoint_count++] = line;
+    }
+}
+
+/* 检查是否在断点处 */
+static int is_breakpoint(int64_t line) {
+    for (int i = 0; i < g_breakpoint_count; i++) {
+        if (g_breakpoints[i] == line) return 1;
+    }
+    return 0;
+}
+
+/* 调试陷阱：在每条语句执行前调用 */
+void rt_debug_trap(int64_t line, const char* func_name) {
+    if (!g_debug_enabled) return;
+
+    /* 检查是否需要在此行停下（首次调用时自动进入单步模式提示） */
+    if (!g_debug_step_mode && !is_breakpoint(line)) return;
+
+    fprintf(stderr, "\n[调试] 行 %lld, 函数 '%s'\n", (long long)line, func_name ? func_name : "??");
+    fflush(stderr);
+    g_debug_step_mode = 0;  /* 单步后清除步进标志 */
+
+    /* 读取调试命令 */
+    char cmd[256];
+    for (;;) {
+        fprintf(stderr, "(xy-dbg) ");
+        fflush(stderr);
+        if (!fgets(cmd, sizeof(cmd), stdin)) break;
+
+        /* 去除换行 */
+        size_t len = strlen(cmd);
+        if (len > 0 && cmd[len-1] == '\n') cmd[len-1] = '\0';
+
+        if (strcmp(cmd, "c") == 0 || strcmp(cmd, "继续") == 0 || strcmp(cmd, "continue") == 0) {
+            return;
+        } else if (strcmp(cmd, "s") == 0 || strcmp(cmd, "单步") == 0 || strcmp(cmd, "step") == 0) {
+            g_debug_step_mode = 1;
+            return;
+        } else if (strcmp(cmd, "q") == 0 || strcmp(cmd, "退出") == 0 || strcmp(cmd, "quit") == 0) {
+            fprintf(stderr, "[调试] 退出程序\n");
+            fflush(stderr);
+            exit(0);
+        } else if (strcmp(cmd, "h") == 0 || strcmp(cmd, "帮助") == 0 || strcmp(cmd, "help") == 0) {
+            fprintf(stderr, "  命令:\n");
+            fprintf(stderr, "    c / 继续 / continue  - 继续执行\n");
+            fprintf(stderr, "    s / 单步 / step      - 单步执行\n");
+            fprintf(stderr, "    q / 退出 / quit      - 退出程序\n");
+            fprintf(stderr, "    h / 帮助 / help      - 显示帮助\n");
+        } else if (strlen(cmd) > 0) {
+            fprintf(stderr, "  未知命令: '%s' (输入 'h' 查看帮助)\n", cmd);
+        }
+        fflush(stderr);
+    }
+}
+
 /* Entry point - provided by compiled IR module */

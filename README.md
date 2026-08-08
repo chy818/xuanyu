@@ -404,15 +404,19 @@ $ XY_ERROR_LANG=both cargo run -- examples/hello.xy --run
 
 ### 发布打包
 
-```powershell
-# 构建 + 测试 + 打包，输出到 dist/xuanyu-<版本>/ 与 zip
-powershell -ExecutionPolicy Bypass -File build/release.ps1
+支持 Windows / Linux / macOS 三平台一键打包：
 
-# 指定版本号（默认读取 Cargo.toml 中的 0.2.0-beta）
+```bash
+# 跨平台 bash 脚本（Windows Git Bash / Linux / macOS 均可使用）
+bash build/release.sh v0.3.0-beta
+
+# Windows 原生 PowerShell（仅 Windows）
 powershell -ExecutionPolicy Bypass -File build/release.ps1 v0.3.0-beta
 ```
 
-打包产物包含：`xy` 编译器、`runtime.c` 运行时库、`xyc.xy` L2 自举源码、`examples/` 示例、`docs/` 文档与 `VERSION` 文件，并在打包后进行「产物可编译 hello.xy」自检。
+打包产物：`dist/xuanyu-<版本>/` 目录 + `.zip`（Windows）或 `.tar.gz`（Linux/macOS），内含 `xy` 编译器、`runtime.c` 运行时库、`xyc.xy` L2 自举源码、`examples/` 示例、`docs/` 文档与 `VERSION` 文件，并在打包后进行「产物可编译 hello.xy」自检。
+
+CI 通过 GitHub Actions 在 tag 推送 (`v*`) 时自动触发三平台构建并上传 artifact。
 
 ---
 

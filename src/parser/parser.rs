@@ -175,6 +175,16 @@ impl Parser {
                     Ok(imp) => imports.push(imp),
                     Err(e) => return Err(e),
                 }
+            } else if self.check(&TokenType::Keyword(Keyword::异步)) {
+                // 异步函数: 异步 函数 名称() { ... }
+                self.position += 1; // 消耗 '异步'
+                match self.parse_function() {
+                    Ok(mut func) => {
+                        func.is_async = true;
+                        functions.push(func);
+                    }
+                    Err(e) => return Err(e),
+                }
             } else if self.check(&TokenType::Keyword(Keyword::函数)) {
                 match self.parse_function() {
                     Ok(func) => functions.push(func),
@@ -1085,6 +1095,14 @@ impl Parser {
             .ok_or_else(|| ParserError::unexpected_token_at(1, 1, "期望语句"))?;
 
         match &token.token_type {
+            // 异步函数定义: 异步 函数 主(): 整数 { ... }
+            TokenType::Keyword(Keyword::异步) => {
+                self.position += 1; // 消耗 '异步'
+                let mut func = self.parse_function()?;
+                func.is_async = true;
+                Ok(Stmt::Fn(func))
+            }
+
             // 函数定义: 函数 主(): 整数 { ... }
             TokenType::Keyword(Keyword::函数) => self.parse_function().map(Stmt::Fn),
             
@@ -2407,6 +2425,19 @@ impl Parser {
                 let expr = self.parse_postfix_expression()?;
 
                 Ok(Expr::Await(AwaitExpr::new(expr, span)))
+            }
+
+            // Spawn 表达式: 启动 表达式
+            // 例如: 启动 异步任务("任务一", 10)
+            // 或: 启动 计算()
+            TokenType::Keyword(Keyword::启动) => {
+                let span = token.span.clone();
+                self.position += 1; // 消耗 '启动'
+
+                // 解析要启动的表达式（通常是函数调用）
+                let expr = self.parse_postfix_expression()?;
+
+                Ok(Expr::Spawn(SpawnExpr::new(expr, span)))
             }
 
             // 整数字面量
