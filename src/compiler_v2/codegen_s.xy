@@ -1,5 +1,5 @@
 引入 "types"
-引入 "codegen"
+/* codegen_s.xy 已为完整实现，无需再引入旧版 codegen.xy */
 
 /**
  * @file codegen.xy
@@ -3025,10 +3025,14 @@
         /* 变量定义 */
         codegen遍历变量定义(cg, stmt)
     } 否则 {
-        若 stmt.kind == 4 则 {
-            /* 赋值语句 */
-            codegen遍历赋值语句(cg, stmt)
+        若 stmt.kind == 19 则 {
+            /* 赋值表达式（含简单赋值与列表元素赋值） */
+            codegen遍历表达式(cg, stmt)
         } 否则 {
+            若 stmt.kind == 4 则 {
+                /* 赋值语句 */
+                codegen遍历赋值语句(cg, stmt)
+            } 否则 {
             若 stmt.kind == 5 则 {
                 /* if 语句 */
                 codegen遍历If语句(cg, stmt)
@@ -3063,7 +3067,7 @@
                                             定义 可变 result: 文本
                                             result = codegen遍历函数调用(cg, stmt.name, stmt.children)
                                         } 否则 {
-                                            若 stmt.kind == 18 则 {
+                                             若 stmt.kind == 18 则 {
                                                 /* 块语句 */
                                                 codegen遍历块语句(cg, stmt)
                                             }
@@ -3076,6 +3080,7 @@
                 }
             }
         }
+    }
     }
 }
 
@@ -3590,6 +3595,8 @@
                                     若 varType == "" 则 {
                                         varType = "i64"
                                     }
+                                    /* 中文类型名映射为 LLVM 类型（如 文本->i8*, 整数->i64） */
+                                    varType = getLLVMType(varType)
                                     /* 生成 store 指令将结果写回变量槽 */
                                     codegenEmit(cg, "  store " + varType + " %" + result + ", " + varType + "* %" + tmpPtr)
                                 } 否则 {

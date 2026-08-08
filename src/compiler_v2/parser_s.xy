@@ -495,14 +495,20 @@ node.kind = 23  // 结构体字段节点
         p.pos = p.pos + 1
         nextTok = parserPeekToken(p)
 
-        // 如果下一个是 =、+=、-=、*=、/=、%= 则为赋值
-        若 nextTok.值 == "=" 则 {
-            p.pos = p.pos + 1  // 消费 =
+        // 下一个是 =、+=、-=、*=、/=、%= 则为赋值
+        若 nextTok.值 == "=" || nextTok.值 == "+=" || nextTok.值 == "-=" ||
+           nextTok.值 == "*=" || nextTok.值 == "/=" || nextTok.值 == "%=" 则 {
+            p.pos = p.pos + 1  // 消费赋值运算符
             定义 可变 valueNode: AST节点
             valueNode = parseExpression(p)
             node.kind = 19  // 赋值表达式
             node.name = tok.值
-            node.value = "="
+            node.value = nextTok.值
+            // 左操作数是标识符表达式，右操作数是赋值值
+            定义 可变 leftNode: AST节点
+            leftNode = parserCreateNode(13, tok.值, tok.值, tok.行号)  // 标识符表达式
+            node.children.追加(leftNode)
+            node.children.追加(valueNode)
             返回 node
         } 否则 {
             // 不是赋值，回退
