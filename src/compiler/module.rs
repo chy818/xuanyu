@@ -12,6 +12,7 @@ use crate::ast::Module;
 use crate::error::CompilerError;
 use crate::LexerError;
 use crate::lexer::Lexer;
+use crate::macro_system::MacroExpander;
 use crate::parser::parse;
 
 /**
@@ -35,6 +36,8 @@ pub struct ModuleResolver {
     modules: HashMap<String, ModuleInfo>,
     /// 搜索路径
     search_paths: Vec<PathBuf>,
+    /// 宏展开器
+    macro_expander: MacroExpander,
 }
 
 impl ModuleResolver {
@@ -45,6 +48,7 @@ impl ModuleResolver {
         Self {
             modules: HashMap::new(),
             search_paths: vec![PathBuf::from(".")],
+            macro_expander: MacroExpander::new(),
         }
     }
 
@@ -85,11 +89,19 @@ impl ModuleResolver {
         // 词法分析
         let mut lexer = Lexer::new(source.clone());
         let tokens = lexer.tokenize()
-            .map_err(|e| CompilerError::Lexer(e))?;
+            .map_err(CompilerError::Lexer)?;
+
+        // 宏展开（提取宏定义并展开宏调用）
+        let tokens = self.macro_expander.expand_tokens(tokens)
+            .map_err(|e| CompilerError::Lexer(LexerError {
+                code: "MACRO-E001".to_string(),
+                message: format!("宏展开错误: {}", e),
+                span: crate::lexer::token::Span::dummy()
+            }))?;
 
         // 语法分析
         let module = parse(tokens)
-            .map_err(|e| CompilerError::Parser(e))?;
+            .map_err(CompilerError::Parser)?;
 
         // 分析依赖
         let dependencies = self.analyze_dependencies(&module);
@@ -244,6 +256,12 @@ impl ModuleResolver {
     }
 }
 
+impl Default for ModuleResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /**
  * 多文件编译器
  */
@@ -287,6 +305,12 @@ impl MultiFileCompiler {
         }
 
         Ok(modules)
+    }
+}
+
+impl Default for MultiFileCompiler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

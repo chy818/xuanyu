@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-tests:
+    name: Rust 单元/集成测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: 缓存 Cargo 依赖
+        uses: Swatinem/rust-cache@v2
+
+      - name: 编译检查
+        run: cargo build --all-targets
+
+      - name: 运行 Rust 测试
+        run: cargo test --all-targets
+
+      - name: 静态检查 (clippy)
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: true
+
+  xy-e2e:
+    name: XY 端到端编译
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 LLVM (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+
+      - name: 安装 LLVM (macOS)
+        if: runner.os == 'macOS'
+        run: brew install llvm clang
+
+      - name: 构建编译器
+        run: cargo build --release
+
+      - name: 编译并运行集成测试
+        run: |
+          set -e
+          XY=target/release/xy
+
+          # 运行并捕获输出，验证功能行为（剥离尾部求和分划线，仅保留程序输出）
+          run_xy() {
+            local file="$1"; local expect="$2"
+            local out
+            out=$("$XY" "$file" --run 2>&1 | sed -n '/--- 运行结果 ---/,$p' | tail -n +2 | sed 's/^-----*$//')
+            if [ "$out" != "$expect" ]; then
+              echo "FAIL: $file"
+              echo " 期望: $expect"
+              echo " 实际: $out"
+              exit 1
+            fi
+            echo "PASS: $file"
+          }
+
+          run_xy examples/hello.xy "$(printf '85\nPass')"
+          run_xy tests/integration/operator_test.xy "$(printf '=== 运算符测试 ===\n13\n7\n30\n3\n1')"
+          run_xy tests/integration/control_flow_test.xy "$(printf '=== 控制流测试 ===\n良好\n15')"
+
+      - name: 宏展开端到端验证
+        run: |
+          set -e
+          XY=target/release/xy
+          out=$("$XY" tests/fixtures/test_macro/macro.xy --run 2>&1 | sed -n '/--- 运行结果 ---/,$p' | tail -n +2 | sed 's/^-----*$//')
+          expect="$(printf '42你好，玄语！')"
+          if [ "$out" != "$expect" ]; then
+            echo "FAIL: macro e2e"
+            echo " 期望: $expect"
+            echo " 实际: $out"
+            exit 1
+          fi
+          echo "PASS: macro e2e"
+
+  bootstrap:
+    name: 自举测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 LLVM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+
+      - name: 构建编译器
+        run: cargo build --release
+
+      - name: 编译 L2 自举源码 (IR 生成验证)
+        run: |
+          set -e
+          XY=target/release/xy
+          for f in src/compiler_v2/xyc.xy src/compiler_v2/lexer_s.xy \
+                   src/compiler_v2/parser_s.xy src/compiler_v2/sema_s.xy \
+                   tests/bootstrap/self_compile_test.xy; do
+            "$XY" "$f" --ir-pure > /dev/null 2>&1
+            echo "IR-PASS: $f"
+          done
+
+      - name: 多文件模块编译验证
+        run: |
+          set -e
+          target/release/xy tests/fixtures/test_multi/main.xy --ir-pure > /dev/null 2>&1
+          echo "MULTI-MODULE-PASS"

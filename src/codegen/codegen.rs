@@ -1761,7 +1761,7 @@ impl CodeGenerator {
                                 if var_type.starts_with("%struct.") {
                                     (alloca.clone(), var_type)
                                 } else {
-                                    drop(alloca);
+                                    let _ = alloca;
                                     let object_val = self.generate_expression(&member.object)?;
                                     let obj_type = self.infer_expression_type(&member.object);
                                     let actual_type = self.variable_types.get(&object_val).cloned().unwrap_or(obj_type.clone());
@@ -3637,7 +3637,6 @@ impl CodeGenerator {
                     "i64".to_string()
                 }
             }
-            _ => "i64".to_string(),
         }
     }
 

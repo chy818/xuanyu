@@ -30,15 +30,13 @@ pub struct Symbol {
  */
 #[derive(Debug, Clone)]
 pub struct Scope {
-    parent: Option<usize>,
     symbols: std::collections::HashMap<String, Symbol>,
     types: std::collections::HashMap<String, Type>,
 }
 
 impl Scope {
-    pub fn new(parent: Option<usize>) -> Self {
+    pub fn new() -> Self {
         Self {
-            parent,
             symbols: std::collections::HashMap::new(),
             types: std::collections::HashMap::new(),
         }
@@ -113,7 +111,7 @@ pub struct SemanticAnalyzer {
 impl SemanticAnalyzer {
     pub fn new() -> Self {
         let mut scopes = Vec::new();
-        scopes.push(Scope::new(None)); // 全局作用域
+        scopes.push(Scope::new()); // 全局作用域
         Self {
             scopes,
             errors: Vec::new(),
@@ -129,8 +127,7 @@ impl SemanticAnalyzer {
      * 进入新作用域
      */
     fn enter_scope(&mut self) {
-        let parent = Some(self.scopes.len() - 1);
-        self.scopes.push(Scope::new(parent));
+        self.scopes.push(Scope::new());
     }
 
     /**

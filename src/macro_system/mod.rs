@@ -139,8 +139,8 @@ pub enum MatcherToken {
 pub struct MacroCall {
     /// 宏名称
     pub name: String,
-    /// 宏参数
-    pub args: Vec<Token>,
+    /// 宏参数（每一参数为一组 token 序列）
+    pub args: Vec<Vec<Token>>,
     /// span 信息
     pub span: Span,
     /// 卫生上下文
@@ -273,42 +273,71 @@ impl MacroExpander {
 
     /**
      * 展开Token流中的所有宏调用
+     * 遍历过程中会提取并注册宏定义（宏 ... 展开 { ... }），
+     * 并将宏调用展开为其模板内容（实参按位置替换形参标识符）。
      */
     pub fn expand_tokens(&mut self, tokens: Vec<Token>) -> Result<Vec<Token>, MacroError> {
         let mut result = Vec::new();
         let mut i = 0;
 
         while i < tokens.len() {
+            // 遇到宏定义关键字，先注册该宏定义并跳过定义体
+            if matches!(tokens[i].token_type, TokenType::Keyword(Keyword::宏)) {
+                let (definition, next) = parse_macro_definition(&tokens, i)?;
+                self.define(definition)?;
+                i = next;
+                continue;
+            }
+
             let token = &tokens[i];
 
-            // 检查是否为宏调用
+            // 检查是否为宏调用（已定义的宏名）
             if self.is_macro_call(token) {
-                // 收集宏参数 (简化：收集到分号或行尾)
+                // 收集括号内的实参（支持嵌套括号配对，顶层逗号分隔参数）
                 let mut args = Vec::new();
                 i += 1;
 
-                // 收集括号内的参数
-                while i < tokens.len() {
-                    let arg_token = &tokens[i];
-                    if let TokenType::Keyword(Keyword::宏) = &arg_token.token_type {
-                        break;
+                if i < tokens.len() && matches!(tokens[i].token_type, TokenType::左圆括号) {
+                    i += 1; // 跳过左括号
+                    let mut depth = 1;
+                    let mut current = Vec::new();
+                    while i < tokens.len() && depth > 0 {
+                        match &tokens[i].token_type {
+                            TokenType::左圆括号 => depth += 1,
+                            TokenType::右圆括号 => depth -= 1,
+                            _ => {}
+                        }
+                        if depth == 0 {
+                            break;
+                        }
+                        if depth == 1 && matches!(tokens[i].token_type, TokenType::逗号) {
+                            args.push(current.clone());
+                            current.clear();
+                        } else {
+                            current.push(tokens[i].clone());
+                        }
+                        i += 1;
                     }
-                    args.push(arg_token.clone());
-                    i += 1;
+                    // 最后一个实参（无后继逗号）
+                    if !current.is_empty() {
+                        args.push(current);
+                    }
+                    i += 1; // 跳过右括号
                 }
 
                 // 创建宏调用并展开
                 let call = MacroCall {
                     name: token.literal.clone(),
                     args,
-                    span: token.span.clone(),
+                    span: token.span,
                     hygiene_context: self.macro_system.current_hygiene,
                 };
 
                 match self.expand(&call)? {
                     MacroExpansion::Success(expanded) => {
-                        // 将展开结果添加到结果中
-                        result.extend(expanded);
+                        // 将展开结果（可能仍含宏调用）递归展开
+                        let nested = self.expand_tokens(expanded)?;
+                        result.extend(nested);
                     }
                     MacroExpansion::WaitingForMore => {
                         // 需要更多输入，暂不处理
@@ -380,12 +409,7 @@ impl MacroSystem {
      * 验证宏定义
      */
     fn validate_macro(&self, macro_def: &MacroDefinition) -> Result<(), MacroError> {
-        if macro_def.params.is_empty() && !macro_def.body.is_empty() {
-            return Err(MacroError::InvalidDefinition(
-                "宏至少需要一个参数".to_string()
-            ));
-        }
-
+        // 允许零参数宏（如无参口号宏）
         for rule in &macro_def.body {
             for token in &rule.matcher {
                 if let MatcherToken::MatchRepeat { ref name, .. } = token {
@@ -436,8 +460,8 @@ impl MacroSystem {
         call: &MacroCall,
     ) -> Result<MacroExpansion, MacroError> {
         for rule in &macro_def.body {
-            if let Some(_binding) = self.try_match_rule(rule, &call.args) {
-                let expanded = self.expand_template(rule)?;
+            if let Some(binding) = self.try_match_rule(rule, &call.args) {
+                let expanded = self.expand_template(rule, &binding)?;
                 return Ok(MacroExpansion::Success(expanded));
             }
         }
@@ -448,23 +472,64 @@ impl MacroSystem {
     /**
      * 尝试匹配规则
      */
-    fn try_match_rule(&self, rule: &MacroRule, args: &[Token]) -> Option<HashMap<String, Vec<Token>>> {
+    fn try_match_rule(&self, rule: &MacroRule, args: &[Vec<Token>]) -> Option<HashMap<String, Vec<Token>>> {
         let mut bindings = HashMap::new();
 
         if rule.matcher.is_empty() {
             return Some(bindings);
         }
 
-        if args.len() < rule.matcher.len() {
-            return None;
-        }
-
-        for (i, matcher) in rule.matcher.iter().enumerate() {
+        // 匹配规则中的占位符（形参）
+        let mut arg_index = 0;
+        for matcher in &rule.matcher {
             match matcher {
-                MatcherToken::MatchExpr(name) | MatcherToken::MatchIdent(name) => {
-                    bindings.insert(name.clone(), vec![args[i].clone()]);
+                MatcherToken::MatchExpr(name) | MatcherToken::MatchIdent(name) | MatcherToken::MatchType(name) => {
+                    if arg_index >= args.len() {
+                        return None;
+                    }
+                    bindings.insert(name.clone(), args[arg_index].clone());
+                    arg_index += 1;
                 }
-                _ => {}
+                MatcherToken::MatchStmt(name) => {
+                    if arg_index >= args.len() {
+                        return None;
+                    }
+                    bindings.insert(name.clone(), args[arg_index].clone());
+                    arg_index += 1;
+                }
+                MatcherToken::MatchLiteral(name) => {
+                    if arg_index >= args.len() {
+                        return None;
+                    }
+                    bindings.insert(name.clone(), args[arg_index].clone());
+                    arg_index += 1;
+                }
+                MatcherToken::ZeroOrMore(inner) | MatcherToken::OneOrMore(inner) => {
+                    // 零个/一个或多个：收集剩余所有实参
+                    if let MatcherToken::MatchExpr(name) | MatcherToken::MatchIdent(name) = &**inner {
+                        let rest: Vec<Token> = args[arg_index..].iter().flatten().cloned().collect();
+                        if matches!(matcher, MatcherToken::OneOrMore(_)) && rest.is_empty() {
+                            return None;
+                        }
+                        bindings.insert(name.clone(), rest);
+                        arg_index = args.len();
+                    }
+                }
+                MatcherToken::MatchRepeat { name, .. } => {
+                    // 重复匹配：收集剩余所有参数
+                    let rest: Vec<Token> = args[arg_index..].iter().flatten().cloned().collect();
+                    bindings.insert(name.clone(), rest);
+                    arg_index = args.len();
+                }
+                MatcherToken::Optional(inner) => {
+                    if let MatcherToken::MatchExpr(name) | MatcherToken::MatchIdent(name) = &**inner {
+                        if arg_index < args.len() {
+                            bindings.insert(name.clone(), args[arg_index].clone());
+                            arg_index += 1;
+                        }
+                    }
+                }
+                MatcherToken::Literal(_) | MatcherToken::Ignore => {}
             }
         }
 
@@ -472,10 +537,23 @@ impl MacroSystem {
     }
 
     /**
-     * 展开模板
+     * 展开模板，将模板中的形参占位符替换为实参
      */
-    fn expand_template(&self, rule: &MacroRule) -> Result<Vec<Token>, MacroError> {
-        Ok(rule.template.clone())
+    fn expand_template(&self, rule: &MacroRule, binding: &HashMap<String, Vec<Token>>) -> Result<Vec<Token>, MacroError> {
+        let mut result = Vec::new();
+
+        for token in &rule.template {
+            // 模板中的形参名（标识符）若出现在绑定表中，则替换为实参 token
+            if let TokenType::标识符 = &token.token_type {
+                if let Some(replacement) = binding.get(&token.literal) {
+                    result.extend(replacement.iter().cloned());
+                    continue;
+                }
+            }
+            result.push(token.clone());
+        }
+
+        Ok(result)
     }
 
     /**
@@ -575,7 +653,7 @@ pub fn parse_macro_definition(tokens: &[Token], start: usize) -> Result<(MacroDe
         }
     }
 
-    // 解析模板 (简单实现：收集到配对的右花括号)
+    // 解析模板 (收集到配对的右花括号)
     let mut template = Vec::new();
     let mut brace_count = 0;
     let mut started = false;
@@ -584,28 +662,31 @@ pub fn parse_macro_definition(tokens: &[Token], start: usize) -> Result<(MacroDe
         let token = &tokens[pos];
         if matches!(token.token_type, TokenType::左花括号) {
             brace_count += 1;
-            started = true;
-        }
-        if matches!(token.token_type, TokenType::右花括号) {
-            if brace_count == 0 && started {
-                break;
+            if started {
+                template.push(token.clone());
             }
+            started = true;
+        } else if matches!(token.token_type, TokenType::右花括号) {
             brace_count -= 1;
             if brace_count == 0 {
+                pos += 1; // 越过右花括号
                 break;
             }
-        }
-        if started {
+            template.push(token.clone());
+        } else if started {
             template.push(token.clone());
         }
         pos += 1;
     }
 
+    // 根据参数列表生成匹配器，使模板中的形参名可被实参替换
+    let matcher = params.iter().map(|p| MatcherToken::MatchExpr(p.name.clone())).collect();
+
     let definition = MacroDefinition {
         name,
         params,
         body: vec![MacroRule {
-            matcher: Vec::new(),
+            matcher,
             template,
             is_export: false,
         }],
@@ -767,5 +848,83 @@ mod tests {
 
         let result = expander.expand_tokens(tokens);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_expand_tokens_with_arg_substitution() {
+        let mut expander = MacroExpander::new();
+        let span = Span::dummy();
+        let id = |name: &str| Token {
+            token_type: TokenType::标识符,
+            literal: name.to_string(),
+            span: span.clone(),
+        };
+        let int = |value: i64| Token {
+            token_type: TokenType::整数字面量,
+            literal: value.to_string(),
+            span: span.clone(),
+        };
+
+        // 定义宏: 宏 双倍 (a) 展开 { a + a }
+        let macro_def = MacroDefinition {
+            name: "双倍".to_string(),
+            params: vec![MacroParam {
+                pattern: MacroPattern::Expr,
+                name: "a".to_string(),
+                is_varargs: false,
+            }],
+            body: vec![MacroRule {
+                matcher: vec![MatcherToken::MatchExpr("a".to_string())],
+                template: vec![id("a"), Token { token_type: TokenType::加, literal: "+".to_string(), span: span.clone() }, id("a")],
+                is_export: false,
+            }],
+            hygiene: MacroHygiene::Full,
+            span: span.clone(),
+        };
+        expander.define(macro_def).unwrap();
+
+        // 调用: 双倍 ( 21 )
+        let tokens = vec![
+            id("双倍"),
+            Token { token_type: TokenType::左圆括号, literal: "(".to_string(), span: span.clone() },
+            int(21),
+            Token { token_type: TokenType::右圆括号, literal: ")".to_string(), span: span.clone() },
+        ];
+
+        let result = expander.expand_tokens(tokens).unwrap();
+        // 展开结果: 21 + 21
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].literal, "21");
+        assert_eq!(result[1].literal, "+");
+        assert_eq!(result[2].literal, "21");
+    }
+
+    #[test]
+    fn test_macro_definition_inline_and_recursive() {
+        let mut expander = MacroExpander::new();
+
+        // 通过 expand_tokens 内联定义并调用: 宏 自增 (n) 展开 { n } 
+        let tokens = vec![
+            Token { token_type: TokenType::Keyword(Keyword::宏), literal: "宏".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::标识符, literal: "同上".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::左圆括号, literal: "(".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::标识符, literal: "n".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::右圆括号, literal: ")".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::Keyword(Keyword::展开), literal: "展开".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::左花括号, literal: "{".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::标识符, literal: "n".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::加, literal: "+".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::整数字面量, literal: "1".to_string(), span: Span::dummy() },
+            Token { token_type: TokenType::右花括号, literal: "}".to_string(), span: Span::dummy() },
+        ];
+
+        // 仅定义时，无宏调用，输出应过滤掉宏定义本身
+        let result = expander.expand_tokens(tokens).unwrap();
+        assert_eq!(result.len(), 0);
+        assert!(expander.is_macro_call(&Token {
+            token_type: TokenType::标识符,
+            literal: "同上".to_string(),
+            span: Span::dummy(),
+        }));
     }
 }
