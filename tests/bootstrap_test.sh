@@ -63,27 +63,27 @@ echo ""
 
 # 显示版本
 echo "[2/5] 显示编译器信息..."
-echo "编译器版本: v0.1.0 (自展版本)"
+echo "编译器版本: v0.2.0-beta (自展版本)"
 echo ""
 
 # 测试词法分析器
 echo "[3/5] 测试自展编译器模块..."
-run_test "词法分析器 (lexer.xy)" "$SRC_DIR/lexer.xy" "--ir"
+run_test "统一入口 (xyc.xy)" "$SRC_DIR/xyc.xy" "--ir"
 
 # 测试语法分析器
-run_test "语法分析器 (parser.xy)" "$SRC_DIR/parser.xy" "--ir"
+run_test "词法分析器 (lexer_s.xy)" "$SRC_DIR/lexer_s.xy" "--ir"
 
 # 测试语义分析器
-run_test "语义分析器 (sema.xy)" "$SRC_DIR/sema.xy" "--ir"
+run_test "语法分析器 (parser_s.xy)" "$SRC_DIR/parser_s.xy" "--ir"
 
 # 测试代码生成器
-run_test "代码生成器 (codegen.xy)" "$SRC_DIR/codegen.xy" "--ir"
+run_test "语义分析器 (sema_s.xy)" "$SRC_DIR/sema_s.xy" "--ir"
 
 # 测试运行时
-run_test "运行时库 (runtime.xy)" "$SRC_DIR/runtime.xy" "--ir"
+run_test "代码生成器 (codegen_s.xy)" "$SRC_DIR/codegen_s.xy" "--ir"
 
-# 测试主程序
-run_test "主程序 (main.xy)" "$SRC_DIR/main.xy" "--ir"
+# 测试运行时接口
+run_test "运行时接口 (runtime.xy)" "$SRC_DIR/runtime.xy" "--ir"
 
 # 测试 hello.xy
 run_test "Hello World 测试" "$PROJECT_ROOT/examples/hello.xy" "--ir"

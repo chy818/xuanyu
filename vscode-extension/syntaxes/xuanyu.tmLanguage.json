@@ -43,15 +43,15 @@
       "patterns": [
         {
           "name": "keyword.control.xuanyu",
-          "match": "\\b(函数|返回|若|否则|则|循环|当|中断|跳过|导入|导出|外部|定义|常量|可变|结构体|枚举|类型|类|接口|实现|扩展|匹配|情况|默认|抛出|捕获|尝试|最终|异步|等待)\\b"
+          "match": "\\b(函数|过程|返回|若|否则|否则若|则|当|直到|循环|从|到|取自|退出|跳出|跳过|引入|导出|外部|模块|定义|可变|常量|静态|结构体|枚举|联合|类型|匹配|情况|默认|抛出|捕获|尝试|最终|异步|等待|启动)\\b"
         },
         {
           "name": "keyword.control.english.xuanyu",
-          "match": "\\b(func|return|if|else|then|loop|while|break|continue|import|export|extern|let|const|mut|struct|enum|type|class|interface|impl|extends|match|case|default|throw|catch|try|finally|async|await)\\b"
+          "match": "\\b(fn|proc|return|if|else|elif|then|while|until|loop|from|to|in|break|continue|import|use|export|pub|extern|module|let|mut|const|static|struct|enum|union|type|match|case|default|throw|catch|try|finally|async|await|spawn)\\b"
         },
         {
           "name": "constant.language.xuanyu",
-          "match": "\\b(真|假|空|True|False|Null)\\b"
+          "match": "\\b(真|假|true|false)\\b"
         }
       ]
     },
@@ -113,7 +113,7 @@
         },
         {
           "name": "keyword.operator.logical.xuanyu",
-          "match": "(且|或|非|\\&\\&|\\|\\||!)"
+          "match": "(&&|\\|\\||!)"
         },
         {
           "name": "keyword.operator.assignment.xuanyu",
@@ -141,7 +141,7 @@
       "patterns": [
         {
           "name": "support.type.primitive.xuanyu",
-          "match": "\\b(整数|浮点|布尔|文本|空类型|Int|Float|Bool|String|Void|Long|Double)\\b"
+          "match": "\\b(整数|长整数|浮点数|双精度|布尔|文本|字符|无返回|指针|或许|任意|数字|浮点|Int|i64|Long|Float|f64|Double|Bool|String|Str|Char|Void|Ptr|Pointer|List|Option|Any)\\b"
         },
         {
           "name": "support.type.collection.xuanyu",

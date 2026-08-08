@@ -126,11 +126,11 @@ function Run-BootstrapTests {
     }
     
     $bootstrapFiles = @(
-        @{ Path = "src\compiler_v2\lexer.xy"; Name = "lexer" },
-        @{ Path = "src\compiler_v2\parser.xy"; Name = "parser" },
-        @{ Path = "src\compiler_v2\sema.xy"; Name = "sema" },
-        @{ Path = "src\compiler_v2\codegen.xy"; Name = "codegen" },
-        @{ Path = "src\compiler_v2\compiler.xy"; Name = "compiler" },
+        @{ Path = "src\compiler_v2\xyc.xy"; Name = "xyc" },
+        @{ Path = "src\compiler_v2\lexer_s.xy"; Name = "lexer" },
+        @{ Path = "src\compiler_v2\parser_s.xy"; Name = "parser" },
+        @{ Path = "src\compiler_v2\sema_s.xy"; Name = "sema" },
+        @{ Path = "src\compiler_v2\codegen_s.xy"; Name = "codegen" },
         @{ Path = "tests\bootstrap\self_compile_test.xy"; Name = "self_compile" }
     )
     
