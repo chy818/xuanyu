@@ -545,6 +545,7 @@ impl Repl {
         let llc_result = Command::new("llc")
             .arg(&temp_ir)
             .arg("-filetype=obj")
+            .arg("-O2")
             .arg("-o")
             .arg(&temp_obj)
             .output();

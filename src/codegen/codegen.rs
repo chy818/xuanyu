@@ -5,13 +5,9 @@
  */
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::ast::*;
 use crate::error::CodegenError;
-
-/// 全局标志：运行时函数声明是否已经生成（跨多个 CodeGenerator 实例共享）
-static RUNTIME_DECLS_EMITTED: AtomicBool = AtomicBool::new(false);
 
 /**
  * 代码生成器
@@ -552,12 +548,10 @@ impl CodeGenerator {
 
     /**
      * 生成运行时库函数声明
+     * 每个实例独立生成声明，通过 self.extern_functions 去重，
+     * 避免使用全局状态导致跨实例污染（REPL 多轮编译时声明丢失）。
      */
     fn emit_runtime_declarations(&mut self) {
-        // 避免重复生成运行时声明（多模块编译时每个模块都会调用 generate_ir）
-        if RUNTIME_DECLS_EMITTED.swap(true, Ordering::SeqCst) {
-            return;
-        }
 
         // 辅助函数：只在未声明时发出声明
         let emit_if_new = |ir: &mut String, decl: &str, extern_funcs: &HashMap<String, (Vec<String>, String)>| {

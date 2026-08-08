@@ -8,7 +8,6 @@ pub mod incremental;
 pub mod module;
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use crate::lexer::{Lexer, Token};
 use crate::parser::Parser;
@@ -23,8 +22,6 @@ use crate::error::CompilerError;
  */
 #[derive(Debug, Clone)]
 pub struct CompilerConfig {
-    /// 是否启用增量编译
-    pub incremental: bool,
     /// 是否启用宏展开
     pub macros_enabled: bool,
     /// 最大宏展开深度
@@ -36,7 +33,6 @@ pub struct CompilerConfig {
 impl Default for CompilerConfig {
     fn default() -> Self {
         Self {
-            incremental: true,
             macros_enabled: true,
             max_macro_depth: 64,
             debug: false,
@@ -85,9 +81,6 @@ pub struct Compiler {
     macro_expander: MacroExpander,
     /// 全局宏定义
     global_macros: HashMap<String, MacroDefinition>,
-    /// 增量编译器（TODO: 尚未完整集成到主编译流程）
-    #[allow(dead_code)]
-    incremental: incremental::IncrementalCompiler,
 }
 
 impl Compiler {
@@ -99,7 +92,6 @@ impl Compiler {
             config,
             macro_expander: MacroExpander::new(),
             global_macros: HashMap::new(),
-            incremental: incremental::IncrementalCompiler::new(Path::new(".cache/xuanyu").to_path_buf()),
         };
 
         compiler.register_builtin_macros();

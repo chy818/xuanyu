@@ -255,10 +255,11 @@ fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
             println!("\n=== 生成对象文件 ===");
             let temp_obj = "temp_output.o";
             
-            // 执行 llc 命令
+            // 执行 llc 命令（启用 O2 优化，提升生成代码性能）
             let llc_result = Command::new("llc")
                 .arg(&temp_ir)
                 .arg("-filetype=obj")
+                .arg("-O2")
                 .arg("-o")
                 .arg(temp_obj)
                 .status();
@@ -674,10 +675,11 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
             println!("\n=== 生成对象文件 ===");
             let temp_obj = "temp_output.o";
             
-            // 执行 llc 命令
+            // 执行 llc 命令（启用 O2 优化，提升生成代码性能）
             let llc_result = Command::new("llc")
                 .arg(&temp_ir)
                 .arg("-filetype=obj")
+                .arg("-O2")
                 .arg("-o")
                 .arg(temp_obj)
                 .status();

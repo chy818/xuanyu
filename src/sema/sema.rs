@@ -64,19 +64,12 @@ impl Scope {
     }
 
     /**
-     * 查找类型定义
+     * 查找类型定义（只查找当前作用域）
+     * 父作用域回溯由 SemanticAnalyzer::lookup_type 统一处理，
+     * 避免 scopes.iter().rev() 与递归向上形成 O(深度²) 双重扫描。
      */
-    pub fn lookup_type<'a>(&'a self, name: &str, scopes: &'a [Scope]) -> Option<&'a Type> {
-        if let Some(t) = self.types.get(name) {
-            return Some(t);
-        }
-        // 递归查找父作用域
-        if let Some(parent_idx) = self.parent {
-            if let Some(parent) = scopes.get(parent_idx) {
-                return parent.lookup_type(name, scopes);
-            }
-        }
-        None
+    pub fn lookup_type(&self, name: &str) -> Option<&Type> {
+        self.types.get(name)
     }
 }
 
@@ -231,9 +224,9 @@ impl SemanticAnalyzer {
      * 查找类型定义
      */
     fn lookup_type(&self, name: &str) -> Option<&Type> {
-        // 从当前作用域向上查找
+        // 从当前作用域向上查找（每个作用域仅查自己的类型表）
         for scope in self.scopes.iter().rev() {
-            if let Some(t) = scope.lookup_type(name, &self.scopes) {
+            if let Some(t) = scope.lookup_type(name) {
                 return Some(t);
             }
         }
@@ -1604,16 +1597,11 @@ impl SemanticAnalyzer {
             // 查找符号
             let symbol = self.lookup_symbol(&ident.name);
             if let Some(sym) = symbol {
-                // 如果找到符号，检查是否是枚举变体
-                let sym_type_str = format!("{:?}", sym.symbol_type);
-                if sym_type_str.contains("::") {
-                    // 是枚举变体构造函数，提取枚举类型
-                    let enum_name = sym_type_str
-                        .trim_start_matches("Custom(\"")
-                        .trim_end_matches("\")");
-                    let parts: Vec<&str> = enum_name.split("::").collect();
-                    if !parts.is_empty() {
-                        return Ok(Type::Custom(parts[0].to_string()));
+                // 如果找到符号，检查是否是枚举变体（Custom("枚举名::变体名")）
+                // 直接模式匹配，避免 format!("{:?}") 当解析器
+                if let Type::Custom(qualified) = &sym.symbol_type {
+                    if let Some((enum_name, _)) = qualified.split_once("::") {
+                        return Ok(Type::Custom(enum_name.to_string()));
                     }
                 }
                 // 返回找到的符号类型
@@ -1656,20 +1644,17 @@ impl SemanticAnalyzer {
     
     /**
      * 查找枚举变体（通过遍历所有符号）
+     * 枚举变体以 Custom("枚举名::变体名") 形式存储，直接模式匹配解析，
+     * 避免使用 Debug 格式化字符串（format!("{:?}")）当解析器。
      */
     fn find_enum_variant(&self, variant_name: &str) -> Option<String> {
         for scope in &self.scopes {
             for (name, symbol) in &scope.symbols {
                 if name == variant_name {
-                    let sym_type_str = format!("{:?}", symbol.symbol_type);
-                    if sym_type_str.contains("::") {
-                        // 提取枚举名: Custom("颜色::红") -> 颜色
-                        let enum_name = sym_type_str
-                            .trim_start_matches("Custom(\"")
-                            .trim_end_matches("\")");
-                        let parts: Vec<&str> = enum_name.split("::").collect();
-                        if !parts.is_empty() {
-                            return Some(parts[0].to_string());
+                    // 提取枚举名: Custom("颜色::红") -> 颜色
+                    if let Type::Custom(qualified) = &symbol.symbol_type {
+                        if let Some((enum_name, _)) = qualified.split_once("::") {
+                            return Some(enum_name.to_string());
                         }
                     }
                 }
