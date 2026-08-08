@@ -179,7 +179,7 @@ jobs:
           echo "MULTI-MODULE-PASS"
 
   # ============================================================
-  # Job 4: 发布打包 (三平台，仅 tag 触发)
+  # Job 4: 发布打包 (三平台，仅 tag 触发，自动上传到 Release)
   # ============================================================
   release:
     name: 发布打包 (${{ matrix.os }})
@@ -218,24 +218,27 @@ jobs:
           echo "Building release for version: $VERSION on $RUNNER_OS"
           bash build/release.sh "$VERSION"
 
-      - name: 确定制品文件名
-        id: artifact_name
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: 上传 artifact (Linux/macOS tar.gz)
-        if: runner.os != 'Windows'
-        uses: actions/upload-artifact@v4
+      - name: 上传到 Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: xuanyu-${{ runner.os }}-${{ github.ref_name }}
-          path: dist/xuanyu-*.tar.gz
-          if-no-files-found: error
+          name: "玄语 ${{ github.ref_name }}"
+          body: |
+            ## 玄语编译器 ${{ github.ref_name }}
 
-      - name: 上传 artifact (Windows zip)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: xuanyu-Windows-${{ github.ref_name }}
-          path: dist/xuanyu-*.zip
-          if-no-files-found: error
+            四大特性：
+            - **异步编程**：异步函数修饰符 + 启动/等待表达式，协程包装器
+            - **调试器**：--debug 断点陷阱 + 交互式单步/继续/退出
+            - **三平台发布**：一键打包脚本，CI 覆盖 Windows/Linux/macOS
+            - **模式匹配**：匹配语句枚举变体判别 + 字段绑定 + 默认分支
+
+            ### 安装使用
+            1. 下载对应平台的压缩包
+            2. 解压，确保系统已安装 LLVM 15+ 和 clang
+            3. 运行：`./xy examples/hello.xy --run`
+
+            ### 平台
+            - **Linux**: tar.gz
+            - **macOS**: tar.gz
+            - **Windows**: zip
+          files: dist/xuanyu-*.*
+          fail_on_unmatched_files: true
