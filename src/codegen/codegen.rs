@@ -620,6 +620,7 @@ impl CodeGenerator {
 
         // 字符串子串和切片
         emit_if_new(&mut self.ir, "declare i8* @rt_substring_fast(i8*, i64, i64)", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_token_eq(i8*, i64, i64, i8*)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i8* @rt_string_substring(i8*, i64, i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i8* @rt_string_slice(i8*, i64, i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i64 @rt_string_len(i8*)", extern_funcs);
@@ -1237,7 +1238,7 @@ impl CodeGenerator {
             self.type_to_llvm_type(type_annotation)
         } else { "i64".to_string() };
 
-        let alloca = self.new_label(&var_name);
+        let mut alloca = self.new_label(&var_name);
         let final_var_type = if let Some(s_name) = &struct_name {
             self.llvm_type_for_named_struct(s_name)
         } else {
@@ -1253,17 +1254,10 @@ impl CodeGenerator {
             let actual_type = self.variable_types.get(&expr_val).cloned().unwrap_or_else(|| self.infer_expression_type(initializer));
 
             if final_var_type.starts_with("%struct.") && actual_type.starts_with("%struct.") && actual_type.ends_with('*') {
-                // RHS 返回的是结构体指针（如 sret 调用返回的 agg_slot）
-                // 需要从指针加载结构体值，再存入新的 alloca
-                let loaded_val = self.new_label("letval");
-                let final_struct_name = if actual_type.ends_with('*') {
-                    &actual_type[..actual_type.len()-1]  // 去掉末尾的 *
-                } else {
-                    &actual_type
-                };
-                self.emit(&format!("    %{} = load {}, {} %{}", loaded_val, final_struct_name, actual_type, expr_val));
-                self.emit(&format!("    %{} = alloca {}, align 8", alloca, final_var_type));
-                self.emit(&format!("    store {} %{}, {}* %{}", final_var_type, loaded_val, final_var_type, alloca));
+                // 优化：直接复用RHS的struct指针作为变量的alloca，消除load+alloca+store拷贝
+                alloca = expr_val.clone();
+                self.variable_types.insert(var_name.clone(), format!("{}*", final_var_type));
+                // 不需要 load/store，直接使用指针
             } else if final_var_type.starts_with("%struct.") {
                 self.emit(&format!("    %{} = alloca {}, align 8", alloca, final_var_type));
                 let final_val = if actual_type != final_var_type {
@@ -1617,7 +1611,6 @@ impl CodeGenerator {
 
                     if var_type.starts_with("%struct.") {
                         // 变量类型是 %struct.T（值类型），alloca 是 %struct.T*
-                        // 剥离可能被污染的 * 后缀（某些路径可能错误地存入 %struct.T*）
                         let clean_type = var_type.trim_end_matches('*').to_string();
                         let load = self.new_label("id");
                         self.emit(&format!("    %{} = load {}, {}* %{}", load, clean_type, clean_type, alloca));
@@ -1766,25 +1759,54 @@ impl CodeGenerator {
                             }
                         }
                     } else {
-                        let object_val = self.generate_expression(&member.object)?;
                         let obj_type = self.infer_expression_type(&member.object);
-                        let actual_type = self.variable_types.get(&object_val).cloned().unwrap_or(obj_type.clone());
-
-                        let ptr_val = if actual_type.ends_with('*') {
-                            object_val
-                        } else if obj_type == "i64" && !actual_type.starts_with("%struct.") {
-                            let ptr = self.new_label("ptr");
-                            self.emit(&format!("    %{} = inttoptr i64 %{} to i8*", ptr, object_val));
-                            ptr
-                        } else if actual_type.starts_with("%struct.") {
-                            // actual_type 是 %struct.T（值类型），创建临时 alloca 获取指针用于 GEP
-                            let tmp_alloca = self.new_label("field_ptr");
-                            self.emit(&format!("    %{} = alloca {}, align 8", tmp_alloca, actual_type));
-                            self.emit(&format!("    store {} %{}, {}* %{}", actual_type, object_val, actual_type, tmp_alloca));
-                            tmp_alloca
+                        // 优化：如果对象是已知struct变量，直接用其alloca指针，避免load+alloca+store拷贝
+                        let (ptr_val, actual_type_for_gep) = if let Expr::Identifier(ident) = &*member.object {
+                            if let Some(alloca) = self.variables.get(&ident.name) {
+                                let var_type = self.variable_types.get(&ident.name).cloned().unwrap_or_else(|| "i64".to_string());
+                                if var_type.starts_with("%struct.") {
+                                    (alloca.clone(), var_type)
+                                } else {
+                                    drop(alloca);
+                                    let object_val = self.generate_expression(&member.object)?;
+                                    let obj_type = self.infer_expression_type(&member.object);
+                                    let actual_type = self.variable_types.get(&object_val).cloned().unwrap_or(obj_type.clone());
+                                    let ptr = if actual_type.ends_with('*') { object_val.clone() }
+                                    else if actual_type.starts_with("%struct.") {
+                                        let tmp_alloca = self.new_label("field_ptr");
+                                        self.emit(&format!("    %{} = alloca {}, align 8", tmp_alloca, actual_type));
+                                        self.emit(&format!("    store {} %{}, {}* %{}", actual_type, object_val, actual_type, tmp_alloca));
+                                        tmp_alloca
+                                    } else { object_val.clone() };
+                                    (ptr, actual_type)
+                                }
+                            } else {
+                                let object_val = self.generate_expression(&member.object)?;
+                                let obj_type = self.infer_expression_type(&member.object);
+                                let actual_type = self.variable_types.get(&object_val).cloned().unwrap_or(obj_type.clone());
+                                let ptr = if actual_type.ends_with('*') { object_val.clone() }
+                                else if actual_type.starts_with("%struct.") {
+                                    let tmp_alloca = self.new_label("field_ptr");
+                                    self.emit(&format!("    %{} = alloca {}, align 8", tmp_alloca, actual_type));
+                                    self.emit(&format!("    store {} %{}, {}* %{}", actual_type, object_val, actual_type, tmp_alloca));
+                                    tmp_alloca
+                                } else { object_val.clone() };
+                                (ptr, actual_type)
+                            }
                         } else {
-                            object_val
+                            let object_val = self.generate_expression(&member.object)?;
+                            let obj_type = self.infer_expression_type(&member.object);
+                            let actual_type = self.variable_types.get(&object_val).cloned().unwrap_or(obj_type.clone());
+                            let ptr = if actual_type.ends_with('*') { object_val.clone() }
+                            else if actual_type.starts_with("%struct.") {
+                                let tmp_alloca = self.new_label("field_ptr");
+                                self.emit(&format!("    %{} = alloca {}, align 8", tmp_alloca, actual_type));
+                                self.emit(&format!("    store {} %{}, {}* %{}", actual_type, object_val, actual_type, tmp_alloca));
+                                tmp_alloca
+                            } else { object_val.clone() };
+                            (ptr, actual_type)
                         };
+                        let actual_type = actual_type_for_gep;
 
                         let obj_type_for_offset = if actual_type.starts_with("%struct.") && actual_type.ends_with('*') {
                             actual_type[0..actual_type.len()-1].to_string()
@@ -2716,6 +2738,7 @@ impl CodeGenerator {
             "rt_str_new" => Some("i8*".to_string()),
             "rt_str_concat" | "rt_string_concat" | "文本拼接" => Some("i8*".to_string()),
             "rt_substring_fast" => Some("i8*".to_string()),
+            "rt_token_eq" | "tokenEq" => Some("i64".to_string()),
             "rt_string_substring" => Some("i8*".to_string()),
             "rt_string_slice" => Some("i8*".to_string()),
             "rt_readline" | "读取行" => Some("i8*".to_string()),
@@ -2797,6 +2820,7 @@ impl CodeGenerator {
             "rt_str_concat" => vec!["i8*".to_string(), "i8*".to_string()],
             "rt_string_concat" => vec!["i8*".to_string(), "i8*".to_string()],
             "rt_substring_fast" => vec!["i8*".to_string(), "i64".to_string(), "i64".to_string()],
+            "rt_token_eq" => vec!["i8*".to_string(), "i64".to_string(), "i64".to_string(), "i8*".to_string()],
             "rt_string_substring" | "rt_string_indexOf" | "文本查找" => vec!["i8*".to_string(), "i8*".to_string()],
             "rt_string_slice" => vec!["i8*".to_string(), "i64".to_string(), "i64".to_string()],
             "rt_string_len" => vec!["i8*".to_string()],
@@ -3746,6 +3770,7 @@ impl CodeGenerator {
                 "执行命令" => "exec_cmd".to_string(),
                 // V2 文本操作
                 "文本切片快" => "rt_substring_fast".to_string(),
+                "tokenEq" => "rt_token_eq".to_string(),
                 "文本切片" | "文本截取" => "rt_string_substring".to_string(),
                 "文本获取字符" => "rt_string_char_at".to_string(),
                 "文本包含" => "str_contains".to_string(),

@@ -208,7 +208,8 @@
     loopContextStack: 列表,
     currentFunctionIndex: 整数,
     functionIndexCounter: 整数,
-    stringConstDefs: 文本
+    stringConstDefs: 文本,
+    outputLines: 列表
 }
 
 /* ============ 错误级别枚举 ============ */

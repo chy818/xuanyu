@@ -15,6 +15,82 @@
 #define pclose _pclose
 #endif
 
+/* ============ Arena 内存池 (bump allocator) ============ */
+typedef struct {
+    char* buffer;
+    int64_t capacity;
+    int64_t offset;
+} Arena;
+
+static Arena* g_arena = NULL;  /* 全局Arena，编译阶段设置 */
+
+Arena* arena_new(int64_t initial_capacity) {
+    Arena* a = (Arena*)malloc(sizeof(Arena));
+    if (!a) return NULL;
+    a->buffer = (char*)malloc(initial_capacity);
+    a->capacity = a->buffer ? initial_capacity : 0;
+    a->offset = 0;
+    return a;
+}
+
+void arena_reset(Arena* a) {
+    if (a) a->offset = 0;
+}
+
+void arena_free_all(Arena* a) {
+    if (a) {
+        free(a->buffer);
+        free(a);
+    }
+}
+
+/* 线程级Arena访问 */
+void rt_arena_set(void* arena) { g_arena = (Arena*)arena; }
+void* rt_arena_get() { return g_arena; }
+
+/* 从Arena分配（bump），Arena满时自动扩容 */
+void* arena_alloc(Arena* a, int64_t size) {
+    if (!a || size <= 0) return NULL;
+    /* 8字节对齐 */
+    int64_t aligned = (size + 7) & ~((int64_t)7);
+    if (a->offset + aligned > a->capacity) {
+        /* 扩容：double + 请求大小 */
+        int64_t new_cap = a->capacity * 2;
+        if (new_cap < a->offset + aligned + 65536)
+            new_cap = a->offset + aligned + 65536;
+        char* new_buf = (char*)realloc(a->buffer, new_cap);
+        if (!new_buf) return NULL;
+        a->buffer = new_buf;
+        a->capacity = new_cap;
+    }
+    void* ptr = a->buffer + a->offset;
+    a->offset += aligned;
+    return ptr;
+}
+
+/* Arena版本的malloc — 自动使用全局Arena，首次调用时自动创建 */
+void* rt_arena_malloc(int64_t size) {
+    if (!g_arena) {
+        /* 懒初始化：首次分配时自动创建 2MB Arena */
+        g_arena = arena_new(2 * 1024 * 1024);
+    }
+    if (g_arena) {
+        void* ptr = arena_alloc(g_arena, size);
+        if (ptr) return ptr;
+        /* Arena满了，回退到系统malloc */
+    }
+    return malloc(size);
+}
+
+/* Arena版本的strdup */
+char* rt_arena_strdup(const char* s) {
+    if (!s) return NULL;
+    int64_t len = (int64_t)strlen(s) + 1;
+    char* buf = (char*)rt_arena_malloc(len);
+    if (buf) memcpy(buf, s, len);
+    return buf;
+}
+
 /** List structure */
 typedef struct {
     void** items;
@@ -24,7 +100,7 @@ typedef struct {
 
 /* Create new list */
 void* rt_list_new() {
-    List* list = (List*)malloc(sizeof(List));
+    List* list = (List*)rt_arena_malloc(sizeof(List));
     if (!list) return NULL;
     list->items = NULL;
     list->count = 0;
@@ -52,14 +128,17 @@ void rt_closure_destroy(void* closure_ptr) {
     free(closure_ptr);
 }
 
-/* Append to list */
+/* Append to list (arena-friendly: 扩容时 arena分配 + 拷贝，避免 realloc) */
 void rt_list_append(void* list_ptr, void* item) {
     if (!list_ptr) return;
     List* list = (List*)list_ptr;
     if (list->count >= list->capacity) {
-        int64_t new_cap = list->capacity == 0 ? 8 : list->capacity * 2;
-        void** new_items = (void**)realloc(list->items, new_cap * sizeof(void*));
+        int64_t new_cap = list->capacity == 0 ? 16 : list->capacity * 2;
+        void** new_items = (void**)rt_arena_malloc(new_cap * sizeof(void*));
         if (!new_items) return;
+        if (list->items && list->count > 0) {
+            memcpy(new_items, list->items, list->count * sizeof(void*));
+        }
         list->items = new_items;
         list->capacity = new_cap;
     }
@@ -368,13 +447,21 @@ void* rt_substring_fast(void* str, int64_t start, int64_t end) {
     if (!str) return NULL;
     char* s = (char*)str;
     if (start < 0) start = 0;
-    if (start >= end) return strdup("");
+    if (start >= end) return rt_arena_strdup("");
     int64_t len = end - start;
-    char* result = (char*)malloc(len + 1);
+    char* result = (char*)rt_arena_malloc(len + 1);
     if (!result) return NULL;
     memcpy(result, s + start, len);
     result[len] = '\0';
     return result;
+}
+
+/* Zero-copy token comparison: compare source[start..end] against expected string */
+int64_t rt_token_eq(void* source, int64_t start, int64_t end, void* expected) {
+    if (!source || !expected) return 0;
+    int64_t len = end - start;
+    if (len != (int64_t)strlen((char*)expected)) return 0;
+    return memcmp((char*)source + start, (char*)expected, len) == 0 ? 1 : 0;
 }
 
 void* str_concat(void* a, void* b) {
@@ -394,8 +481,8 @@ void* str_slice(void* str, int64_t start, int64_t end) {
     int64_t len = strlen(s);
     if (start < 0) start = 0;
     if (end > len) end = len;
-    if (start >= end) return strdup("");
-    char* result = (char*)malloc(end - start + 1);
+    if (start >= end) return rt_arena_strdup("");
+    char* result = (char*)rt_arena_malloc(end - start + 1);
     if (!result) return NULL;
     strncpy(result, s + start, end - start);
     result[end - start] = '\0';
