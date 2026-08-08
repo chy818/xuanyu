@@ -337,6 +337,46 @@ void* rt_string_char_at(void* str, int64_t byte_index) {
     return result;
 }
 
+/* Fast UTF-8 codepoint decode at byte position — zero allocation, O(1) */
+int64_t rt_utf8_codepoint_at(void* str, int64_t byte_pos) {
+    if (!str) return -1;
+    unsigned char* s = (unsigned char*)str;
+    unsigned char c = s[byte_pos];
+    if (c == 0) return -1;  /* End of string */
+
+    int64_t cp;
+
+    if ((c & 0x80) == 0) {
+        cp = c;
+    } else if ((c & 0xE0) == 0xC0) {
+        if (s[byte_pos + 1] == 0) return c;
+        cp = ((c & 0x1F) << 6) | (s[byte_pos + 1] & 0x3F);
+    } else if ((c & 0xF0) == 0xE0) {
+        if (s[byte_pos + 1] == 0 || s[byte_pos + 2] == 0) return c;
+        cp = ((c & 0x0F) << 12) | ((s[byte_pos + 1] & 0x3F) << 6) | (s[byte_pos + 2] & 0x3F);
+    } else if ((c & 0xF8) == 0xF0) {
+        if (s[byte_pos + 1] == 0 || s[byte_pos + 2] == 0 || s[byte_pos + 3] == 0) return c;
+        cp = ((c & 0x07) << 18) | ((s[byte_pos + 1] & 0x3F) << 12) | ((s[byte_pos + 2] & 0x3F) << 6) | (s[byte_pos + 3] & 0x3F);
+    } else {
+        cp = c;  /* Invalid UTF-8, return raw byte */
+    }
+    return cp;
+}
+
+/* Zero-strlen substring — caller guarantees start/end are within string bounds */
+void* rt_substring_fast(void* str, int64_t start, int64_t end) {
+    if (!str) return NULL;
+    char* s = (char*)str;
+    if (start < 0) start = 0;
+    if (start >= end) return strdup("");
+    int64_t len = end - start;
+    char* result = (char*)malloc(len + 1);
+    if (!result) return NULL;
+    memcpy(result, s + start, len);
+    result[len] = '\0';
+    return result;
+}
+
 void* str_concat(void* a, void* b) {
     if (!a || !b) return NULL;
     size_t len_a = strlen((char*)a);

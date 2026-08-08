@@ -45,7 +45,7 @@
     scope.名称 = 名称
     scope.符号表 = 列表()
     scope.层级 = 列表长度(sema.作用域栈)
-
+    
     若 列表长度(sema.作用域栈) > 0 则 {
         scope.父作用域 = sema.当前作用域
     } 否则 {
@@ -54,7 +54,7 @@
 
     定义 可变 idx: 整数
     idx = 列表长度(sema.作用域栈)
-
+    
     /* 将新作用域添加到作用域栈 */
     列表追加(sema.作用域栈, scope)
 
@@ -155,25 +155,25 @@
  * 在当前作用域查找符号（不向上查找父作用域）
  */
 函数 在当前作用域查找符号(sema: Sema, 名称: 文本): 整数 {
-/*[DBG]     打印("DBG 查找 当前作用域=") */
-/*[DBG]     打印整数(sema.当前作用域) */
-/*[DBG]     打印(" 栈长=") */
-/*[DBG]     打印整数(列表长度(sema.作用域栈)) */
+    打印("DBG 查找 当前作用域=")
+    打印整数(sema.当前作用域)
+    打印(" 栈长=")
+    打印整数(列表长度(sema.作用域栈))
     若 sema.当前作用域 < 0 || sema.当前作用域 >= 列表长度(sema.作用域栈) 则 {
         返回 -1
     }
-/*[DBG]     打印("DBG 查找 读取scope") */
+    打印("DBG 查找 读取scope")
     定义 可变 scope: 作用域
     scope = sema.作用域栈[sema.当前作用域]
-/*[DBG]     打印("DBG 查找 scope表长=") */
-/*[DBG]     打印整数(列表长度(scope.符号表)) */
+    打印("DBG 查找 scope表长=")
+    打印整数(列表长度(scope.符号表))
 
     定义 可变 i: 整数
     i = 0
     当 i < 列表长度(scope.符号表) 则 {
-/*[DBG]         打印("DBG 查找 sym[") */
-/*[DBG]         打印整数(i) */
-/*[DBG]         打印("]") */
+        打印("DBG 查找 sym[")
+        打印整数(i)
+        打印("]")
         定义 可变 sym: 符号
         sym = scope.符号表[i]
         若 sym.名称 == 名称 则 {
@@ -189,12 +189,12 @@
  * 添加符号到当前作用域
  */
 函数 添加符号(sema: Sema, 名称: 文本, 类型: 整数, 可变: 整数): 整数 {
-/*[DBG]     打印("DBG 添加符号 开始: ") */
-/*[DBG]     打印(名称) */
+    打印("DBG 添加符号 开始: ")
+    打印(名称)
     // 检查是否已在当前作用域定义
     定义 可变 existingIdx: 整数
     existingIdx = 在当前作用域查找符号(sema, 名称)
-/*[DBG]     打印("DBG 添加符号 查找完成") */
+    打印("DBG 添加符号 查找完成")
 
     若 existingIdx >= 0 则 {
         报告错误(sema, "符号 '" + 名称 + "' 已在当前作用域定义", sema.当前行号)
@@ -213,20 +213,20 @@
     若 sema.当前作用域 < 0 || sema.当前作用域 >= 列表长度(sema.作用域栈) 则 {
         创建作用域(sema, "全局")
     }
-/*[DBG]     打印("DBG 添加符号 作用域有效") */
+    打印("DBG 添加符号 作用域有效")
 
     // 添加符号到当前作用域
     定义 可变 scope: 作用域
     scope = 列表获取(sema.作用域栈, sema.当前作用域)
-/*[DBG]     打印("DBG 添加符号 读取scope") */
+    打印("DBG 添加符号 读取scope")
     列表追加(scope.符号表, sym)
-/*[DBG]     打印("DBG 添加符号 追加sym") */
-
+    打印("DBG 添加符号 追加sym")
+    
     // 更新作用域栈中的作用域
     // 注意：玄语语言中列表元素是值类型，需要重新赋值
     列表设置(sema.作用域栈, sema.当前作用域, scope)
-/*[DBG]     打印("DBG 添加符号 列表设置完成 returns") */
-/*[DBG]     打印整数(sema.当前作用域) */
+    打印("DBG 添加符号 列表设置完成 returns")
+    打印整数(sema.当前作用域)
 
     返回 0
 }
@@ -319,7 +319,7 @@
  */
 函数 报告错误(sema: Sema, 消息: 文本, 行号: 整数): 整数 {
     sema.错误计数 = sema.错误计数 + 1
-
+    
     打印("[错误]")
     若 行号 > 0 则 {
         打印(" (行")
@@ -328,7 +328,7 @@
     }
     打印(": ")
     打印(消息)
-
+    
     返回 -1
 }
 
@@ -337,7 +337,7 @@
  */
 函数 报告警告(sema: Sema, 消息: 文本, 行号: 整数): 整数 {
     sema.警告计数 = sema.警告计数 + 1
-
+    
     打印("[警告]")
     若 行号 > 0 则 {
         打印(" (行")
@@ -346,7 +346,7 @@
     }
     打印(": ")
     打印(消息)
-
+    
     返回 0
 }
 
@@ -355,7 +355,7 @@
  */
 函数 报告详细错误(sema: Sema, 消息: 文本, 行号: 整数, 列号: 整数, 建议: 文本): 整数 {
     sema.错误计数 = sema.错误计数 + 1
-
+    
     打印("━━━━━━━━━━━━━━━━━━━━━━━━")
     打印("[错误]")
     若 行号 > 0 则 {
@@ -374,7 +374,7 @@
         打印("  建议: " + 建议)
     }
     打印("━━━━━━━━━━━━━━━━━━━━━━━━")
-
+    
     返回 -1
 }
 
@@ -1137,7 +1137,7 @@
     /* 更新循环状态 */
     sema.循环状态.激活 = 1
     sema.循环状态.循环层级 = sema.循环状态.循环层级 + 1
-
+    
     打印("进入循环作用域，层级: ")
     打印(sema.循环状态.循环层级)
 }
@@ -1153,7 +1153,7 @@
         sema.循环状态.激活 = 0
         sema.循环状态.循环层级 = 0
     }
-
+    
     打印("退出循环作用域，剩余层级: ")
     打印(sema.循环状态.循环层级)
 }
@@ -1220,13 +1220,8 @@
             若 result < 0 则 {
                 errorCount = errorCount + 1
             }
-        } 否则 若 child.kind == 30 则 {  /* 外部声明 - 注册函数名 */
-            若 child.name != "" 则 {
-                若 查找符号(sema, child.name) < 0 则 {
-                    定义 可变 r: 整数
-                    r = 添加符号(sema, child.name, 0, 0)
-                }
-            }
+        } 否则 若 child.kind == 30 则 {  /* 外部声明 - 直接跳过，语义分析不报错 */
+            打印("跳过外部声明")
         } 否则 {
             打印("未知顶层声明类型: ")
             打印(child.kind)
@@ -1301,7 +1296,7 @@
 函数 sema遍历函数定义(sema: Sema, funcNode: AST节点): 整数 {
     定义 可变 funcName: 文本
     funcName = funcNode.name
-
+    
     /* 设置当前函数信息 */
     sema.当前函数名 = funcName
     sema.当前函数返回类型 = 0  /* 默认整数类型 */
@@ -1340,7 +1335,7 @@
     若 列表长度(funcNode.children) == 1 则 {
         bodyIdx = 0  /* 如果只有一个子节点，就是 body */
     }
-
+    
     定义 可变 body: AST节点
     body = 列表获取(funcNode.children, bodyIdx)
 
@@ -1356,11 +1351,11 @@
         打印("遍历表达式")
         定义 可变 exprType: 整数
         exprType = sema遍历表达式(sema, body)
-
+        
         /* 检查返回类型 */
         若 exprType >= 0 && sema.当前函数返回类型 >= 0 则 {
             若 类型兼容(exprType, sema.当前函数返回类型) == 0 则 {
-                报告错误(sema, "函数返回类型不匹配: 期望 " + 类型转文本(sema.当前函数返回类型) +
+                报告错误(sema, "函数返回类型不匹配: 期望 " + 类型转文本(sema.当前函数返回类型) + 
                      ", 实际 " + 类型转文本(exprType), funcNode.line)
             }
         }
@@ -1369,7 +1364,7 @@
     /* 退出函数作用域 */
     sema退出函数(sema)
     退出作用域(sema)
-
+    
     /* 清除当前函数信息 */
     sema.当前函数名 = ""
     sema.当前函数返回类型 = -1
@@ -1384,36 +1379,36 @@
 函数 sema分析参数列表(sema: Sema, paramListNode: AST节点): 整数 {
     打印("分析参数列表，参数个数: ")
     打印(列表长度(paramListNode.children))
-
+    
     定义 可变 i: 整数
     i = 0
     当 i < 列表长度(paramListNode.children) 则 {
         定义 可变 paramNode: AST节点
         paramNode = 列表获取(paramListNode.children, i)
-
+        
         /* 参数节点应该是标识符或变量定义 */
         定义 可变 paramName: 文本
         paramName = paramNode.name
-
+        
         /* 默认参数类型为整数 */
         定义 可变 paramType: 整数
         paramType = 0
-
+        
         打印("  参数: ")
         打印(paramName)
         打印(" 类型: ")
         打印(类型转文本(paramType))
-
+        
         /* 添加参数到作用域 */
         定义 可变 result: 整数
         result = 添加符号(sema, paramName, paramType, 1)  /* 参数是可变的 */
         若 result < 0 则 {
             返回 -1
         }
-
+        
         i = i + 1
     }
-
+    
     返回 0
 }
 
@@ -1538,21 +1533,21 @@
     若 result < 0 则 {
         返回 -1
     }
-/*[DBG]     打印("DBG 遍历变量定义 添加完成 children长度=") */
-/*[DBG]     打印整数(列表长度(varNode.children)) */
+    打印("DBG 遍历变量定义 添加完成 children长度=")
+    打印整数(列表长度(varNode.children))
 
     /* 分析初始化表达式 */
     若 列表长度(varNode.children) > 0 则 {
         定义 可变 initExpr: AST节点
         initExpr = 列表获取(varNode.children, 0)
-
+        
         定义 可变 initType: 整数
         initType = sema遍历表达式(sema, initExpr)
-
+        
         /* 检查初始化类型兼容性 */
         若 initType >= 0 则 {
             若 类型兼容(varType, initType) == 0 则 {
-                报告警告(sema, "变量 '" + varName + "' 初始化类型不兼容: 期望 " +
+                报告警告(sema, "变量 '" + varName + "' 初始化类型不兼容: 期望 " + 
                           类型转文本(varType) + ", 实际 " + 类型转文本(initType), varNode.line)
             }
         }
@@ -1795,19 +1790,19 @@
     /* 分析目标表达式 */
     定义 可变 targetType: 整数
     targetType = sema遍历表达式(sema, target)
-
+    
     /* 分析值表达式 */
     定义 可变 valueType: 整数
     valueType = sema遍历表达式(sema, value)
-
+    
     /* 检查类型兼容性 */
     若 targetType >= 0 && valueType >= 0 则 {
         若 检查赋值兼容性(targetType, valueType) == 0 则 {
-            报告错误(sema, "赋值类型不兼容: 目标类型 " + 类型转文本(targetType) +
+            报告错误(sema, "赋值类型不兼容: 目标类型 " + 类型转文本(targetType) + 
                      ", 值类型 " + 类型转文本(valueType), sema.当前行号)
         }
     }
-
+    
     /* 赋值表达式返回目标类型 */
     返回 targetType
 }
@@ -1955,7 +1950,6 @@
     result = 添加符号(sema, "获取参数", 3, 0)
     /* UTF-8工具 */
     result = 添加符号(sema, "utf8字节长度", 0, 0)
-    result = 添加符号(sema, "utf8码点", 0, 0)
     result = 添加符号(sema, "是utf8首字节", 2, 0)
     result = 添加符号(sema, "是utf8续字节", 2, 0)
     /* 字符判断 */
@@ -2603,19 +2597,19 @@
     sema.全局作用域 = -1
     sema.当前函数名 = ""
     sema.当前函数返回类型 = -1
-
+    
     /* 初始化循环状态 */
     sema.循环状态.激活 = 0
     sema.循环状态.循环层级 = 0
-
+    
     /* 创建全局作用域 */
     定义 可变 globalScopeIdx: 整数
     globalScopeIdx = 创建作用域(sema, "全局")
     sema.全局作用域 = globalScopeIdx
-
+    
     /* 注册内置函数 */
     注册内置函数(sema)
-
+    
     返回 sema
 }
 
@@ -2624,19 +2618,19 @@
  */
 函数 sema分析AST(sema: Sema, ast: AST节点): 整数 {
     打印("=== 开始语义分析 ===")
-
+    
     sema.错误计数 = 0
     sema.警告计数 = 0
-
+    
     定义 可变 errorCount: 整数
     errorCount = sema遍历AST(sema, ast)
-
+    
     打印("=== 语义分析完成 ===")
     打印("错误数: ")
     打印(sema.错误计数)
     打印("警告数: ")
     打印(sema.警告计数)
-
+    
     返回 errorCount
 }
 
@@ -2645,13 +2639,13 @@
  */
 函数 打印符号表(sema: Sema): 无返回 {
     打印("=== 符号表 ===")
-
+    
     定义 可变 i: 整数
     i = 0
     当 i < 列表长度(sema.作用域栈) 则 {
         定义 可变 scope: 作用域
         scope = 列表获取(sema.作用域栈, i)
-
+        
         打印("作用域 ")
         打印(i)
         打印(": ")
@@ -2659,7 +2653,7 @@
         打印(" (层级=")
         打印(scope.层级)
         打印(")")
-
+        
         定义 可变 j: 整数
         j = 0
         当 j < 列表长度(scope.符号表) 则 {
@@ -2688,7 +2682,7 @@
     root.kind = 0  /* 程序 */
     root.name = "测试程序"
     root.children = 列表()
-
+    
     /* 创建变量定义 */
     定义 可变 varNode: AST节点
     varNode.kind = 3  /* 变量定义 */
@@ -2696,29 +2690,29 @@
     varNode.intValue = 0  /* 整数类型 */
     varNode.line = 1
     varNode.children = 列表()
-
+    
     /* 添加到根节点 */
     列表追加(root.children, varNode)
-
+    
     /* 创建函数定义 */
     定义 可变 funcNode: AST节点
     funcNode.kind = 1  /* 函数定义 */
     funcNode.name = "测试函数"
     funcNode.line = 3
     funcNode.children = 列表()
-
+    
     /* 创建函数体块语句 */
     定义 可变 blockNode: AST节点
     blockNode.kind = 18  /* 块语句 */
     blockNode.line = 4
     blockNode.children = 列表()
-
+    
     /* 添加函数参数和体到函数 */
     列表追加(funcNode.children, blockNode)
-
+    
     /* 添加函数到根节点 */
     列表追加(root.children, funcNode)
-
+    
     返回 root
 }
 
@@ -2727,25 +2721,25 @@
  */
 函数 测试语义分析(): 整数 {
     打印("=== 开始语义分析器测试 ===")
-
+    
     /* 初始化语义分析器 */
     定义 可变 sema: Sema
     sema = semaInit("测试源码")
-
+    
     /* 创建测试 AST */
     定义 可变 testAST: AST节点
     testAST = 创建测试AST()
-
+    
     /* 运行语义分析 */
     定义 可变 errorCount: 整数
     errorCount = sema分析AST(sema, testAST)
-
+    
     /* 打印符号表 */
     打印符号表(sema)
-
+    
     打印("=== 测试完成 ===")
     打印("错误数: ")
     打印(errorCount)
-
+    
     返回 errorCount
 }

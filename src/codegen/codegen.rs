@@ -619,6 +619,7 @@ impl CodeGenerator {
         emit_if_new(&mut self.ir, "declare void @rt_list_set(i8*, i64, i8*)", extern_funcs);
 
         // 字符串子串和切片
+        emit_if_new(&mut self.ir, "declare i8* @rt_substring_fast(i8*, i64, i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i8* @rt_string_substring(i8*, i64, i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i8* @rt_string_slice(i8*, i64, i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i64 @rt_string_len(i8*)", extern_funcs);
@@ -662,6 +663,7 @@ impl CodeGenerator {
 
         // UTF-8 helper functions
         emit_if_new(&mut self.ir, "declare i64 @rt_utf8_byte_length(i64)", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_utf8_codepoint_at(i8*, i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i64 @rt_is_utf8_leader(i64)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i64 @rt_is_utf8_continuation(i64)", extern_funcs);
     }
@@ -2713,6 +2715,7 @@ impl CodeGenerator {
             "rt_list_get" | "列表获取" => Some("i8*".to_string()),
             "rt_str_new" => Some("i8*".to_string()),
             "rt_str_concat" | "rt_string_concat" | "文本拼接" => Some("i8*".to_string()),
+            "rt_substring_fast" => Some("i8*".to_string()),
             "rt_string_substring" => Some("i8*".to_string()),
             "rt_string_slice" => Some("i8*".to_string()),
             "rt_readline" | "读取行" => Some("i8*".to_string()),
@@ -2722,6 +2725,7 @@ impl CodeGenerator {
             "rt_list_len" | "列表长度" => Some("i64".to_string()),
             "rt_string_len" | "文本长度" => Some("i64".to_string()),
             "rt_utf8_byte_length" | "utf8字节长度" => Some("i64".to_string()),
+            "rt_utf8_codepoint_at" | "utf8码点" => Some("i64".to_string()),
             "rt_string_indexOf" | "文本查找" => Some("i64".to_string()),
             "rt_is_utf8_leader" | "是utf8首字节" => Some("i64".to_string()),
             "rt_is_utf8_continuation" | "是utf8续字节" => Some("i64".to_string()),
@@ -2792,11 +2796,13 @@ impl CodeGenerator {
             "rt_list_len" => vec!["i8*".to_string()],
             "rt_str_concat" => vec!["i8*".to_string(), "i8*".to_string()],
             "rt_string_concat" => vec!["i8*".to_string(), "i8*".to_string()],
+            "rt_substring_fast" => vec!["i8*".to_string(), "i64".to_string(), "i64".to_string()],
             "rt_string_substring" | "rt_string_indexOf" | "文本查找" => vec!["i8*".to_string(), "i8*".to_string()],
             "rt_string_slice" => vec!["i8*".to_string(), "i64".to_string(), "i64".to_string()],
             "rt_string_len" => vec!["i8*".to_string()],
             // UTF-8 helper functions
             "rt_utf8_byte_length" => vec!["i64".to_string()],
+            "rt_utf8_codepoint_at" => vec!["i8*".to_string(), "i64".to_string()],
             "rt_is_utf8_leader" => vec!["i64".to_string()],
             "rt_is_utf8_continuation" => vec!["i64".to_string()],
             "rt_str_new" => vec!["i8*".to_string()],
@@ -3739,6 +3745,7 @@ impl CodeGenerator {
                 "文件存在" => "file_exists".to_string(),
                 "执行命令" => "exec_cmd".to_string(),
                 // V2 文本操作
+                "文本切片快" => "rt_substring_fast".to_string(),
                 "文本切片" | "文本截取" => "rt_string_substring".to_string(),
                 "文本获取字符" => "rt_string_char_at".to_string(),
                 "文本包含" => "str_contains".to_string(),
@@ -3750,6 +3757,7 @@ impl CodeGenerator {
                 "编码转字符" => "rt_code_to_char".to_string(),
                 // UTF-8 helper functions
                 "utf8字节长度" => "rt_utf8_byte_length".to_string(),
+                "utf8码点" => "rt_utf8_codepoint_at".to_string(),
                 "是utf8首字节" => "rt_is_utf8_leader".to_string(),
                 "是utf8续字节" => "rt_is_utf8_continuation".to_string(),
                 _ => {

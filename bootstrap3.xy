@@ -1,0 +1,74 @@
+外部 函数 tokenize(源码: 文本): 列表
+外部 函数 parser分析Tokens(tokens: 列表, source: 文本): AST节点
+外部 函数 semaInit(源码: 文本): Sema
+外部 函数 sema分析AST(sema: Sema, ast: AST节点): 整数
+外部 函数 codegen遍历AST(ast: AST节点): 文本
+
+函数 主(): 整数 {
+    定义 参数个数: 整数
+    参数个数 = 获取参数个数()
+
+    定义 源文件: 文本
+    源文件 = ""
+    定义 ir文件: 文本
+    ir文件 = ""
+
+    定义 i: 整数
+    i = 1
+    当 i < 参数个数 则 {
+        定义 p: 文本
+        p = 获取参数(i)
+        若 p == "--ir-file" 则 {
+            i = i + 1
+            若 i < 参数个数 则 {
+                ir文件 = 获取参数(i)
+            }
+        } 否则 若 p == "--version" 则 {
+            打印("XY Bootstrap Compiler v0.2.0")
+            返回 0
+        } 否则 {
+            源文件 = p
+        }
+        i = i + 1
+    }
+
+    若 源文件 == "" 则 {
+        打印("Usage: xyc <file.xy> --ir-file <out.ll>")
+        返回 1
+    }
+
+    定义 源码: 文本
+    源码 = 读取文件(源文件)
+    若 文本长度(源码) == 0 则 {
+        打印("Error: empty file")
+        返回 1
+    }
+
+    定义 tokens: 列表
+    tokens = tokenize(源码)
+
+    定义 ast: AST节点
+    ast = parser分析Tokens(tokens, 源码)
+
+    定义 sema: Sema
+    sema = semaInit("")
+    定义 errors: 整数
+    errors = sema分析AST(sema, ast)
+    若 errors > 0 则 {
+        打印("Sema errors")
+        返回 1
+    }
+
+    定义 ir: 文本
+    ir = codegen遍历AST(ast)
+
+    若 ir文件 != "" 则 {
+        写入文件(ir文件, ir)
+        打印("IR written: ")
+        打印(ir文件)
+    } 否则 {
+        打印(ir)
+    }
+
+    返回 0
+}

@@ -151,7 +151,7 @@
     // 变量名和值作为一对添加到列表
     列表追加(cg.variableMap, varName)
     列表追加(cg.variableMap, ssaValue)
-
+    
     // 变量名和类型作为一对添加到列表
     列表追加(cg.variableTypes, varName)
     列表追加(cg.variableTypes, varType)
@@ -247,7 +247,7 @@
         }
         i = i + 2
     }
-
+    
     // 创建新的字符串常量
     定义 可变 constName: 文本
     constName = "str"
@@ -255,11 +255,11 @@
     idxStr = 整数转文本(cg.stringConstCount)
     constName = constName + idxStr
     cg.stringConstCount = cg.stringConstCount + 1
-
+    
     // 添加到常量表
     列表追加(cg.stringConstants, str)
     列表追加(cg.stringConstants, constName)
-
+    
     返回 constName
 }
 
@@ -887,8 +887,8 @@
 
     定义 可变 alloca: 文本
     alloca = varName + "_alloca"
-    codegenEmit(cg, "%" + alloca + " = alloca ptr")
-    codegenEmit(cg, "store i64 %" + result + ", ptr %" + alloca)
+    codegenEmit(cg, "%" + alloca + " = alloca i64")
+    codegenEmit(cg, "store i64 %" + result + ", i64* %" + alloca)
 
     cg.indent = cg.indent - 1
     codegenEmit(cg, condLabel + ":")
@@ -1330,7 +1330,7 @@
 
 函数 emitBuiltinDecls(cg: Codegen) {
     codegenEmit(cg, "; ==================== 内置函数声明 ====================")
-    codegenEmit(cg, "declare void @print(ptr)")
+    codegenEmit(cg, "declare void @print(i8*)")
     codegenEmit(cg, "declare i64 @print_int(i64)")
     codegenEmit(cg, "declare double @print_float(double)")
     codegenEmit(cg, "declare i8* @print_string(i8*)")
@@ -1347,17 +1347,17 @@
     codegenEmit(cg, "declare void @rt_list_set(i8*, i64, i8*)")
     codegenEmit(cg, "declare i8* @rt_list_get(i8*, i64)")
     codegenEmit(cg, "declare i64 @rt_list_len(i8*)")
-
+    
     /* 文件 I/O 函数 */
     codegenEmit(cg, "declare i8* @file_read(i8*)")
     codegenEmit(cg, "declare i32 @file_write(i8*, i8*)")
     codegenEmit(cg, "declare i32 @file_exists(i8*)")
     codegenEmit(cg, "declare i32 @file_delete(i8*)")
-
+    
     /* 命令执行函数 */
     codegenEmit(cg, "declare i32 @exec_cmd(i8*)")
     codegenEmit(cg, "declare i8* @cmd_output(i8*)")
-
+    
     /* 输入函数 */
     codegenEmit(cg, "declare i64 @input_int()")
     codegenEmit(cg, "declare i8* @input_text()")
@@ -1641,7 +1641,7 @@
     result = codegenNewTemp(cg)
 
     定义 可变 line: 文本
-    line = "%" + result + " = load volatile i64, ptr %" + tmpPtr
+    line = "%" + result + " = load volatile i64, i64* %" + tmpPtr
     codegenEmit(cg, line)
 
     返回 result
@@ -1652,7 +1652,7 @@
  */
 函数 codegenVolatileStore(cg: Codegen, value: 文本, tmpPtr: 文本): 无返回 {
     定义 可变 line: 文本
-    line = "store volatile i64 %" + value + ", ptr %" + tmpPtr
+    line = "store volatile i64 %" + value + ", i64* %" + tmpPtr
     codegenEmit(cg, line)
 }
 
@@ -1795,7 +1795,7 @@
     cg.currentReturnType = returnType
 
     /* 变量分配 */
-    codegenEmit(cg, "%result = alloca ptr")
+    codegenEmit(cg, "%result = alloca i64")
 
     /* 函数体 - 根据函数名生成不同 IR */
 
@@ -1868,7 +1868,7 @@
                 /* 标识符 - 加载变量 */
                 result = codegenNewTemp(cg)
                 定义 可变 line: 文本
-                line = "%" + result + " = load i64, ptr %" + value
+                line = "%" + result + " = load i64, i64* %" + value
                 codegenEmit(cg, line)
             }
         }
@@ -1941,7 +1941,7 @@
     定义 可变 line: 文本
     line = "%" + startTmp + " = add i64 0, " + 整数转文本(startVal)
     codegenEmit(cg, line)
-    line = "store i64 %" + startTmp + ", ptr %" + iterVar
+    line = "store i64 %" + startTmp + ", i64* %" + iterVar
     codegenEmit(cg, line)
 }
 
@@ -2408,7 +2408,7 @@
     若 op == "*" && operand == 0 则 { 返回 0 }
     若 op == "|" && operand == 0 则 { 返回 0 }
     若 op == "&" && operand == -1 则 { 返回 0 }
-
+    
     若 op == "*" && operand == 2 则 { 返回 1 }
     若 op == "<<" && operand == 1 则 { 返回 2 }
     若 op == ">>" && operand == 1 则 { 返回 3 }
@@ -2684,14 +2684,7 @@
                             codegen遍历导入语句(cg, child)
                         } 否则 {
                             若 child.kind == 30 则 {
-                                /* 外部声明 - 生成 declare */
-                                定义 可变 extName: 文本
-                                extName = child.name
-                                若 extName != "" 则 {
-                                    定义 可变 declLine: 文本
-                                    declLine = "declare i64 @" + extName + "(...)"
-                                    codegenEmit(cg, declLine)
-                                }
+                                /* 外部声明 - 直接跳过，不生成代码 */
                             }
                         }
                     }
@@ -2835,19 +2828,19 @@
     cg.currentFunc = fullFuncName
     cg.currentFunctionIndex = cg.functionIndexCounter
     cg.functionIndexCounter = cg.functionIndexCounter + 1
-
+    
     /* 清空变量映射，进入新作用域 */
     codegen清空变量(cg)
 
     /* 生成函数头 */
     codegenEmit(cg, "")
-
+    
     /* 处理参数列表 */
     定义 可变 bodyIdx: 整数
     bodyIdx = 0
     定义 可变 paramStr: 文本
     paramStr = ""
-
+    
     若 列表长度(funcNode.children) > 1 则 {
         /* 可能有参数列表，先处理参数 */
         定义 可变 paramNode: AST节点
@@ -2869,7 +2862,7 @@
             }
         }
     }
-
+    
     /* 生成函数定义 - 添加模块名前缀以避免重复符号 */
     定义 可变 fullFuncName: 文本
     若 funcName == "主" 则 {
@@ -2881,7 +2874,7 @@
     cg.indent = cg.indent + 1
 
     /* 生成函数体 */
-
+    
     /* 处理函数体 */
     若 bodyIdx < 列表长度(funcNode.children) 则 {
         定义 可变 body: AST节点
@@ -3014,8 +3007,8 @@
  * 遍历语句
  */
 函数 codegen遍历语句(cg: Codegen, stmt: AST节点): 无返回 {
-/*[DBG]     打印("DBG cg语句 kind=") */
-/*[DBG]     打印整数(stmt.kind) */
+    打印("DBG cg语句 kind=")
+    打印整数(stmt.kind)
     若 stmt.kind == 3 则 {
         /* 变量定义 */
         codegen遍历变量定义(cg, stmt)
@@ -3111,7 +3104,7 @@
         } 否则 {
             slotName = slotVar + "_" + 整数转文本(i)
         }
-        codegenEmit(cg, "  %" + slotName + " = alloca ptr, align 8")
+        codegenEmit(cg, "  %" + slotName + " = alloca i64, align 8")
         i = i + 1
     }
 
@@ -3124,9 +3117,9 @@
         initNode = 列表获取(varNode.children, 0)
         定义 可变 initVal: 文本
         initVal = codegen遍历表达式(cg, initNode)
-        codegenEmit(cg, "  store i64 %" + initVal + ", ptr %" + tmpPtr)
-/*[DBG]         打印("DBG cg变量定义 init完成 init=") */
-/*[DBG]         打印(initVal) */
+        codegenEmit(cg, "  store i64 %" + initVal + ", i64* %" + tmpPtr)
+        打印("DBG cg变量定义 init完成 init=")
+        打印(initVal)
     }
 }
 
@@ -3415,7 +3408,7 @@
     cg.indent = cg.indent - 1
     codegenEmit(cg, condLabel + ":")
     cg.indent = cg.indent + 1
-
+    
     定义 可变 cond: AST节点
     cond = 列表获取(whileNode.children, 0)
     定义 可变 condVar: 文本
@@ -3428,7 +3421,7 @@
     cg.indent = cg.indent - 1
     codegenEmit(cg, bodyLabel + ":")
     cg.indent = cg.indent + 1
-
+    
     定义 可变 body: AST节点
     body = 列表获取(whileNode.children, 1)
     codegen遍历块语句(cg, body)
@@ -3516,8 +3509,8 @@
  * 遍历表达式
  */
 函数 codegen遍历表达式(cg: Codegen, expr: AST节点): 文本 {
-/*[DBG]     打印("DBG ex表达") */
-/*[DBG]     打印整数(expr.kind) */
+    打印("DBG ex表达")
+    打印整数(expr.kind)
     定义 可变 result: 文本
     result = ""
 
@@ -3558,8 +3551,8 @@
                     若 expr.kind == 12 则 {
                         /* 调用表达式 */
                         result = codegen遍历函数调用(cg, expr.name, expr.children)
-/*[DBG]                         打印("DBG 12完成=") */
-/*[DBG]                         打印(result) */
+                        打印("DBG 12完成=")
+                        打印(result)
                     } 否则 {
                         若 expr.kind == 19 则 {
                             /* 赋值表达式 - 将右值存储到左边的变量槽或列表元素 */
@@ -3631,8 +3624,8 @@
                                 }
                             } 否则 {
                                 /* 默认: 返回临时变量 */
-/*[DBG]                                 打印("DBG 默认case kind=") */
-/*[DBG]                                 打印整数(expr.kind) */
+                                打印("DBG 默认case kind=")
+                                打印整数(expr.kind)
                                 result = codegenNewTemp(cg)
                                 codegenEmit(cg, "  %" + result + " = add i64 0, 0")
                             }
@@ -3643,8 +3636,8 @@
              }
         }
 
-/*[DBG]     打印("DBG 表达返回=") */
-/*[DBG]     打印(result) */
+    打印("DBG 表达返回=")
+    打印(result)
     返回 result
 }
 
@@ -3669,12 +3662,12 @@
     varType = codegen查找变量类型(cg, name)
 
     /* 根据类型生成加载指令 */
-    若 varType == "i8*" || varType == "文本" || varType == "列表" || varType == "任意" || varType == "AST节点" || varType == "Sema" || varType == "Codegen" || varType == "Parser" || varType == "Lexer" || varType == "Token" || varType == "循环上下文" || varType == "循环状态" 则 {
-        /* 指针类型（列表、字符串、结构体等）- 从 ptr 加载 */
-        codegenEmit(cg, "  %" + result + " = load ptr, ptr %" + slotName)
+    若 varType == "i8*" 则 {
+        /* 指针类型（列表、字符串等）- 从 i8** 加载 */
+        codegenEmit(cg, "  %" + result + " = load i8*, i8** %" + slotName)
     } 否则 {
-        /* 整数类型 - 从 ptr 加载 i64 */
-        codegenEmit(cg, "  %" + result + " = load i64, ptr %" + slotName)
+        /* 默认整数类型 - 从 i64* 加载 */
+        codegenEmit(cg, "  %" + result + " = load i64, i64* %" + slotName)
     }
 
     返回 result
@@ -3826,8 +3819,8 @@
  * 注意：需要根据函数签名确定参数类型
  */
 函数 codegen遍历函数调用(cg: Codegen, funcName: 文本, args: 列表): 文本 {
-/*[DBG]     打印("DBG codegen调用: ") */
-/*[DBG]     打印(funcName) */
+    打印("DBG codegen调用: ")
+    打印(funcName)
     定义 可变 result: 文本
     result = codegenNewTemp(cg)
 
@@ -3895,8 +3888,6 @@
         映射后的函数名 = "is_alnum"
     } 否则 若 funcName == "utf8字节长度" 则 {
         映射后的函数名 = "rt_utf8_byte_length"
-    } 否则 若 funcName == "utf8码点" 则 {
-        映射后的函数名 = "rt_utf8_codepoint_at"
     } 否则 若 funcName == "是utf8首字节" 则 {
         映射后的函数名 = "rt_is_utf8_leader"
     } 否则 若 funcName == "是utf8续字节" 则 {
@@ -3911,8 +3902,6 @@
         映射后的函数名 = "rt_string_len"
     } 否则 若 funcName == "文本连接" 则 {
         映射后的函数名 = "rt_string_concat"
-    } 否则 若 funcName == "文本切片快" 则 {
-        映射后的函数名 = "rt_substring_fast"
     } 否则 若 funcName == "文本截取" 则 {
         映射后的函数名 = "rt_string_substring"
     } 否则 若 funcName == "文本查找" 则 {
@@ -3966,20 +3955,20 @@
     }
 
     /* void返回函数 */
-    若 funcName == "打印" || funcName == "打印整数" ||
-       funcName == "列表追加" || funcName == "列表设置" ||
-       funcName == "列表清空" || funcName == "运行时错误" ||
+    若 funcName == "打印" || funcName == "打印整数" || 
+       funcName == "列表追加" || funcName == "列表设置" || 
+       funcName == "列表清空" || funcName == "运行时错误" || 
        funcName == "退出" || funcName == "释放内存块" ||
        funcName == "列表添加" 则 {
         returnType = "void"
     }
 
     /* i8*指针返回函数 */
-    若 funcName == "文本拼接" || funcName == "文本连接" ||
-       funcName == "列表" || funcName == "列表获取" ||
-       funcName == "文件读取" || funcName == "命令行参数" ||
+    若 funcName == "文本拼接" || funcName == "文本连接" || 
+       funcName == "列表" || funcName == "列表获取" || 
+       funcName == "文件读取" || funcName == "命令行参数" || 
        funcName == "输入文本" || funcName == "申请内存" ||
-       funcName == "文本截取" || funcName == "文本转大写" ||
+       funcName == "文本截取" || funcName == "文本转大写" || 
        funcName == "文本转小写" || funcName == "创建列表" ||
        funcName == "列表克隆" || funcName == "命令输出" ||
        funcName == "取列表元素" || funcName == "添加列表元素" ||
@@ -3990,13 +3979,13 @@
     /* 处理函数参数 - 根据函数名确定参数类型 */
     定义 可变 argStr: 文本
     argStr = ""
-/*[DBG]     打印("DBG 列表长度(args)=") */
-/*[DBG]     打印整数(列表长度(args)) */
+    打印("DBG 列表长度(args)=")
+    打印整数(列表长度(args))
     若 列表长度(args) > 0 则 {
         定义 可变 i: 整数
         i = 0
-/*[DBG]         打印("DBG args长度=") */
-/*[DBG]         打印整数(列表长度(args)) */
+        打印("DBG args长度=")
+        打印整数(列表长度(args))
         当 i < 列表长度(args) 则 {
             定义 可变 argNode: AST节点
             argNode = 列表获取(args, i)
@@ -4202,11 +4191,6 @@
         返回 "i64"
     }
 
-    /* rt_utf8_codepoint_at(i8*, i64) - 返回码点 */
-    若 funcName == "rt_utf8_codepoint_at" 则 {
-        返回 "i64"
-    }
-
     /* rt_is_utf8_leader(i64) - 整数参数 */
     若 funcName == "rt_is_utf8_leader" 则 {
         返回 "i64"
@@ -4341,7 +4325,7 @@
     result = name + "_val"
 
     定义 可变 line: 文本
-    line = "%" + result + " = load i64, ptr %" + name + "_slot"
+    line = "%" + result + " = load i64, i64* %" + name + "_slot"
     codegenEmit(cg, line)
 
     返回 result
@@ -4355,7 +4339,7 @@
     tmpPtr = name + "_slot"
 
     定义 可变 line: 文本
-    line = "%" + tmpPtr + " = alloca ptr"
+    line = "%" + tmpPtr + " = alloca i64"
     codegenEmit(cg, line)
 
     返回 tmpPtr
@@ -4369,7 +4353,7 @@
     result = codegenNewTemp(cg)
 
     定义 可变 line: 文本
-
+    
     /* 特殊处理列表操作函数 */
     若 funcName == "_u5217_u8868_u8ffd_u52a0" 则 {
         /* 列表添加/追加 */
@@ -4453,7 +4437,7 @@
     tmpPtr = varName + "_slot"
 
     定义 可变 line: 文本
-    line = "store i64 %" + value + ", ptr %" + tmpPtr
+    line = "store i64 %" + value + ", i64* %" + tmpPtr
     codegenEmit(cg, line)
 }
 
@@ -4489,7 +4473,7 @@
     line = "%" + startTmp + " = add i64 0, " + 整数转文本(startVal)
     codegenEmit(cg, line)
 
-    line = "store i64 %" + startTmp + ", ptr %" + tmpPtr
+    line = "store i64 %" + startTmp + ", i64* %" + tmpPtr
     codegenEmit(cg, line)
 
     line = "br label %" + incLabel
@@ -4661,49 +4645,49 @@
     root.kind = 0  // 程序节点
     root.name = "测试程序"
     root.children = 列表()
-
+    
     /* 创建主函数 */
     定义 可变 mainFunc: AST节点
     mainFunc.kind = 1  // 函数定义
     mainFunc.name = "主"
     mainFunc.children = 列表()
-
+    
     /* 创建函数体（块语句） */
     定义 可变 body: AST节点
     body.kind = 18  // 块语句
     body.children = 列表()
-
+    
     /* 添加变量定义：x = 42 */
     定义 可变 varX: AST节点
     varX.kind = 3  // 变量定义
     varX.name = "x"
     varX.children = 列表()
-
+    
     /* 添加字面量 42 */
     定义 可变 lit42: AST节点
     lit42.kind = 14  // 字面量表达式
     lit42.value = "42"
     列表追加(varX.children, lit42)
     列表追加(body.children, varX)
-
+    
     /* 添加返回语句 */
     定义 可变 retStmt: AST节点
     retStmt.kind = 8  // 返回语句
     retStmt.children = 列表()
-
+    
     /* 添加标识符 x */
     定义 可变 idX: AST节点
     idX.kind = 13  // 标识符表达式
     idX.name = "x"
     列表追加(retStmt.children, idX)
     列表追加(body.children, retStmt)
-
+    
     /* 把函数体添加到函数 */
     列表追加(mainFunc.children, body)
-
+    
     /* 把主函数添加到根节点 */
     列表追加(root.children, mainFunc)
-
+    
     返回 root
 }
 
@@ -4712,20 +4696,20 @@
  */
 函数 codegen测试(): 整数 {
     打印("=== 代码生成器测试 ===")
-
+    
     /* 创建测试 AST */
     定义 可变 testAST: AST节点
     testAST = codegen创建测试AST()
-
+    
     /* 遍历 AST 生成 IR */
     打印("正在生成 LLVM IR...")
     定义 可变 moduleName: 文本
     moduleName = codegen遍历AST(testAST)
-
+    
     打印("=== 测试完成 ===")
     打印("生成的模块: ")
     打印(moduleName)
-
+    
     返回 1
 }
 
@@ -4734,10 +4718,10 @@
  */
 函数 codegen测试字符串常量(): 整数 {
     打印("=== 字符串常量测试 ===")
-
+    
     定义 可变 cg: Codegen
     cg = codegenInit()
-
+    
     /* 添加一些字符串常量 */
     定义 可变 str1: 文本
     str1 = codegen添加字符串常量(cg, "Hello, World!")
@@ -4745,25 +4729,25 @@
     str2 = codegen添加字符串常量(cg, "测试字符串")
     定义 可变 str3: 文本
     str3 = codegen添加字符串常量(cg, "Hello, World!")  // 重复的字符串
-
+    
     打印("字符串1: ")
     打印(str1)
     打印("字符串2: ")
     打印(str2)
     打印("字符串3 (重复): ")
     打印(str3)
-
+    
     /* 查找字符串 */
     定义 可变 found1: 文本
     found1 = codegen查找字符串常量(cg, "Hello, World!")
     定义 可变 found2: 文本
     found2 = codegen查找字符串常量(cg, "不存在的字符串")
-
+    
     打印("查找 'Hello, World!': ")
     打印(found1)
     打印("查找 '不存在的字符串': ")
     打印(found2)
-
+    
     打印("=== 字符串常量测试完成 ===")
     返回 1
 }
@@ -4773,15 +4757,15 @@
  */
 函数 codegen测试变量映射(): 整数 {
     打印("=== 变量映射测试 ===")
-
+    
     定义 可变 cg: Codegen
     cg = codegenInit()
-
+    
     /* 添加变量 */
     codegen添加变量(cg, "x", "x_slot", "整数")
     codegen添加变量(cg, "y", "y_slot", "浮点数")
     codegen添加变量(cg, "name", "name_slot", "文本")
-
+    
     /* 查找变量 */
     定义 可变 ssaX: 文本
     ssaX = codegen查找变量(cg, "x")
@@ -4793,7 +4777,7 @@
     typeY = codegen查找变量类型(cg, "y")
     定义 可变 ssaNotFound: 文本
     ssaNotFound = codegen查找变量(cg, "不存在的变量")
-
+    
     打印("变量 x - SSA: ")
     打印(ssaX)
     打印(", 类型: ")
@@ -4804,12 +4788,12 @@
     打印(typeY)
     打印("变量 '不存在的变量': ")
     打印(ssaNotFound)
-
+    
     /* 清空变量映射 */
     codegen清空变量(cg)
     打印("清空后变量映射大小: ")
     打印(列表长度(cg.variableMap))
-
+    
     打印("=== 变量映射测试完成 ===")
     返回 1
 }
@@ -4823,22 +4807,22 @@
     打印("   玄语 L2 编译器 - 代码生成器测试")
     打印("========================================")
     打印("")
-
+    
     定义 可变 success: 整数
     success = 1
-
+    
     /* 测试变量映射 */
     若 codegen测试变量映射() != 1 则 { success = 0 }
     打印("")
-
+    
     /* 测试字符串常量 */
     若 codegen测试字符串常量() != 1 则 { success = 0 }
     打印("")
-
+    
     /* 测试完整代码生成 */
     若 codegen测试() != 1 则 { success = 0 }
     打印("")
-
+    
     打印("========================================")
     若 success == 1 则 {
         打印("   所有测试通过 ✓")
@@ -4847,6 +4831,6 @@
     }
     打印("========================================")
     打印("")
-
+    
     返回 success
 }

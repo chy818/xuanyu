@@ -145,9 +145,9 @@
     node.intValue = 0
     node.line = line
     node.children = 列表()
-/*[DBG]     打印("DEBUG parseBlock: end, children=") */
-/*[DBG]     打印整数(列表长度(node.children)) */
-/*[DBG]     打印("\n") */
+    打印("DEBUG parseBlock: end, children=")
+    打印整数(列表长度(node.children))
+    打印("\n")
     返回 node
 }
 
@@ -251,13 +251,13 @@
     /* 循环解析参数 */
     循环 {
         tok = parserPeekToken(p)
-/*[DBG]         打印("DEBUG parseCall: tok='") */
-/*[DBG]         打印(tok.值) */
-/*[DBG]         打印("' type=") */
-/*[DBG]         打印整数(tok.类型) */
-/*[DBG]         打印(" pos=") */
-/*[DBG]         打印整数(p.pos) */
-/*[DBG]         打印("\n") */
+        打印("DEBUG parseCall: tok='")
+        打印(tok.值)
+        打印("' type=")
+        打印整数(tok.类型)
+        打印(" pos=")
+        打印整数(p.pos)
+        打印("\n")
 
         // 结束条件：遇到 )
         若 tok.值 == ")" 则 {
@@ -469,9 +469,9 @@ node.kind = 23  // 结构体字段节点
         tok = parserPeekToken(p)
     }
 
-/*[DBG]     打印("DEBUG parseBlock: end, children=") */
-/*[DBG]     打印整数(列表长度(node.children)) */
-/*[DBG]     打印("\n") */
+    打印("DEBUG parseBlock: end, children=")
+    打印整数(列表长度(node.children))
+    打印("\n")
     返回 node
 }
 
@@ -697,7 +697,7 @@ node.kind = 23  // 结构体字段节点
     node = parserCreateNode(18, "", "", line)  // 块语句
     node.children = 列表()
 
-/*[DBG]     打印("DEBUG parseBlock: start\n") */
+    打印("DEBUG parseBlock: start\n")
     /* 消费 '{' */
     若 tok.值 == "{" 则 {
         p.pos = p.pos + 1
@@ -705,17 +705,17 @@ node.kind = 23  // 结构体字段节点
 
     /* 循环解析语句 */
     tok = parserPeekToken(p)
-/*[DBG]     打印("DEBUG parseBlock: first body tok='") */
-/*[DBG]     打印(tok.值) */
-/*[DBG]     打印("' type=") */
-/*[DBG]     打印整数(tok.类型) */
-/*[DBG]     打印("\n") */
+    打印("DEBUG parseBlock: first body tok='")
+    打印(tok.值)
+    打印("' type=")
+    打印整数(tok.类型)
+    打印("\n")
     当 tok.值 != "}" && tok.值 != "" && tok.类型 != 6 则 {
-/*[DBG]         打印("DEBUG blk: tok=") */
-/*[DBG]         打印(tok.值) */
-/*[DBG]         打印(" type=") */
-/*[DBG]         打印整数(tok.类型) */
-/*[DBG]         打印("\n") */
+        打印("DEBUG blk: tok=")
+        打印(tok.值)
+        打印(" type=")
+        打印整数(tok.类型)
+        打印("\n")
         定义 可变 stmt: AST节点
 
         若 tok.值 == "定义" 则 {
@@ -1026,9 +1026,9 @@ node.kind = 23  // 结构体字段节点
         p.pos = p.pos + 1
     }
 
-/*[DBG]     打印("DEBUG parseBlock: end, children=") */
-/*[DBG]     打印整数(列表长度(node.children)) */
-/*[DBG]     打印("\n") */
+    打印("DEBUG parseBlock: end, children=")
+    打印整数(列表长度(node.children))
+    打印("\n")
     返回 node
 }
 
@@ -1238,21 +1238,11 @@ node.kind = 23  // 结构体字段节点
             node.children.追加(memberNode)
             p.pos = p.pos + 1
 
-            /* 消费 '= 值' 如果有 */
+            /* 消费 ',' || '}' */
             tok = parserPeekToken(p)
-            若 tok.值 == "=" 则 {
-                p.pos = p.pos + 1  /* 跳过 '=' */
-                tok = parserPeekToken(p)  /* 跳过值 */
-                p.pos = p.pos + 1
-                tok = parserPeekToken(p)
-            }
-
-            /* 消费 ',' */
             若 tok.值 == "," 则 {
                 p.pos = p.pos + 1
             }
-        } 否则 {
-            p.pos = p.pos + 1
         }
 
         tok = parserPeekToken(p)
@@ -2081,11 +2071,11 @@ node.kind = 23  // 结构体字段节点
  * 这是解析器的外部入口函数
  */
 函数 parser分析Tokens(tokens: 列表, source: 文本): AST节点 {
-/*[DBG]     打印("DEBUG parser入口: tokensPtr=") */
-/*[DBG]     打印(tokens) */
-/*[DBG]     打印(" srcLen=") */
-/*[DBG]     打印整数(文本长度(source)) */
-/*[DBG]     打印("\n") */
+    打印("DEBUG parser入口: tokensPtr=")
+    打印(tokens)
+    打印(" srcLen=")
+    打印整数(文本长度(source))
+    打印("\n")
     定义 可变 p: Parser
     p = parserInit(tokens)
 
@@ -2094,29 +2084,29 @@ node.kind = 23  // 结构体字段节点
     progNode.children = 列表()
 
     定义 可变 tok: Token
-/*[DBG]     打印("DEBUG parser: pos=") 打印整数(p.pos) 打印(" count=") 打印整数(p.tokenCount) 打印("\n") */
-/*[DBG]     打印("DEBUG parser: about to peek\n") */
+    打印("DEBUG parser: pos=") 打印整数(p.pos) 打印(" count=") 打印整数(p.tokenCount) 打印("\n")
+    打印("DEBUG parser: about to peek\n")
     tok = parserPeekToken(p)
-/*[DBG]     打印("DEBUG parser: peek done, type=") */
-/*[DBG]     打印整数(tok.类型) */
-/*[DBG]     打印(" value='") */
-/*[DBG]     打印(tok.值) */
-/*[DBG]     打印("'\n") */
-/*[DBG]     打印("DEBUG parser: entering loop\n") */
+    打印("DEBUG parser: peek done, type=")
+    打印整数(tok.类型)
+    打印(" value='")
+    打印(tok.值)
+    打印("'\n")
+    打印("DEBUG parser: entering loop\n")
 
     /* 循环解析直到文件结束 */
     当 tok.类型 != 6 && tok.值 != "" 则 {
-/*[DBG]         打印("DEBUG parser loop: tok=") */
-/*[DBG]         打印(tok.值) */
-/*[DBG]         打印(" type=") */
-/*[DBG]         打印整数(tok.类型) */
-/*[DBG]         打印("\n") */
+        打印("DEBUG parser loop: tok=")
+        打印(tok.值)
+        打印(" type=")
+        打印整数(tok.类型)
+        打印("\n")
         若 tok.值 == "函数" || tok.值 == "function" 则 {
-/*[DBG]             打印("DEBUG: calling parseFunction\n") */
+            打印("DEBUG: calling parseFunction\n")
             定义 可变 funcNode: AST节点
             funcNode = parseFunction(p)
             progNode.children.追加(funcNode)
-/*[DBG]             打印("DEBUG: parseFunction returned\n") */
+            打印("DEBUG: parseFunction returned\n")
         } 否则 若 tok.值 == "结构体" || tok.值 == "struct" 则 {
             定义 可变 structNode: AST节点
             structNode = parseStructDefinition(p)
@@ -2178,29 +2168,11 @@ node.kind = 23  // 结构体字段节点
         p.pos = p.pos + 1
     }
 
-    /* 支持两种语法: 外部 "C名"  或  外部 函数 名(参数): 返回类型 */
+    /* 获取函数名字符串 */
     tok = parserPeekToken(p)
     若 tok.类型 == 2 则 {
-        /* 旧语法: 外部 "C函数名" */
         node.name = tok.值
         p.pos = p.pos + 1
-    } 否则 若 tok.值 == "函数" 则 {
-        /* 新语法: 外部 函数 名(参数): 返回类型 */
-        p.pos = p.pos + 1  /* 消费 '函数' */
-        tok = parserPeekToken(p)
-        若 tok.类型 == 0 则 {
-            node.name = tok.值
-            p.pos = p.pos + 1
-        }
-        /* 跳过参数列表和返回类型，直到遇到换行或下一个声明关键字 */
-        tok = parserPeekToken(p)
-        当 tok.值 != "" && tok.类型 != 6 则 {
-            若 tok.值 == "外部" || tok.值 == "函数" || tok.值 == "结构体" || tok.值 == "枚举" || tok.值 == "引入" 则 {
-                跳出
-            }
-            p.pos = p.pos + 1
-            tok = parserPeekToken(p)
-        }
     }
 
     返回 node
