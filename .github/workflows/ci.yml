@@ -82,6 +82,7 @@ jobs:
           run_xy examples/hello.xy "$(printf '85\nPass')"
           run_xy tests/integration/operator_test.xy "$(printf '=== 运算符测试 ===\n13\n7\n30\n3\n1')"
           run_xy tests/integration/control_flow_test.xy "$(printf '=== 控制流测试 ===\n良好\n15')"
+          run_xy tests/integration/match_test.xy "$(printf '红色1')"
 
       - name: 宏展开端到端验证
         run: |

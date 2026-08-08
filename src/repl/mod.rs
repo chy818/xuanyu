@@ -184,6 +184,12 @@ pub enum ReplCommand {
     Shell(String),
     /// 重置 REPL
     Reset,
+    /// 调试: 设置断点（占位，v0.3.0 接入真实断点）
+    DebugBreakpoint(String),
+    /// 调试: 继续执行（占位）
+    DebugContinue,
+    /// 调试: 单步执行（占位）
+    DebugStep,
     /// 未知命令
     Unknown(String),
 }
@@ -265,7 +271,7 @@ impl Repl {
     fn print_welcome(&self) {
         println!();
         println!("╔═══════════════════════════════════════════════════════════╗");
-        println!("║                    玄语 REPL v0.2.0-beta                   ║");
+        println!("║             {}                     ║", crate::version!());
         println!("║              交互式编程环境 - 以中文，写世界                 ║");
         println!("╚═══════════════════════════════════════════════════════════╝");
         println!();
@@ -687,8 +693,8 @@ impl Repl {
                 println!("类型检查: {}", if self.config.type_check { "开启" } else { "关闭" });
             }
             ReplCommand::Version => {
-                println!("玄语 REPL v0.2.0-beta");
-                println!("编译器版本: v0.2.0-beta");
+                println!("玄语 REPL {}", crate::version!());
+                println!("编译器版本: {}", crate::version!());
                 println!("后端: LLVM");
             }
             ReplCommand::Shell(cmd) => {
@@ -699,6 +705,18 @@ impl Repl {
                 self.multiline_buffer.clear();
                 self.in_multiline = false;
                 println!("REPL 已重置");
+            }
+            ReplCommand::DebugBreakpoint(arg) => {
+                println!("[调试占位] 断点命令已收到: {}", arg);
+                println!("真实断点功能将在 v0.3.0 接入（行号 -> IR label 映射）。");
+            }
+            ReplCommand::DebugContinue => {
+                println!("[调试占位] 继续执行命令已收到。");
+                println!("真实继续功能将在 v0.3.0 接入（恢复被暂停的协程/进程）。");
+            }
+            ReplCommand::DebugStep => {
+                println!("[调试占位] 单步命令已收到。");
+                println!("真实单步功能将在 v0.3.0 接入（源码行级步进）。");
             }
             ReplCommand::Unknown(cmd) => {
                 println!("未知命令: {}", cmd);
@@ -742,6 +760,14 @@ impl Repl {
                 }
             }
             "reset" | "重置" => ReplCommand::Reset,
+            "break" | "断点" | "b" => {
+                match arg {
+                    Some(n) => ReplCommand::DebugBreakpoint(n),
+                    None => ReplCommand::Unknown("断点 命令需要行号参数".to_string()),
+                }
+            }
+            "continue" | "继续" | "c" => ReplCommand::DebugContinue,
+            "step" | "单步" | "s" => ReplCommand::DebugStep,
             _ => ReplCommand::Unknown(input.to_string()),
         }
     }
@@ -770,6 +796,9 @@ impl Repl {
         println!("  :函数, :funcs            显示所有已定义函数");
         println!("  :详细, :verbose, :v      切换详细输出模式");
         println!("  :类型检查, :typecheck    切换类型检查");
+        println!("  :断点, :break <行号>     设置断点（占位，v0.3.0 接入）");
+        println!("  :继续, :continue         继续执行（占位，v0.3.0 接入）");
+        println!("  :单步, :step             单步执行（占位，v0.3.0 接入）");
         println!();
         println!("系统命令:");
         println!("  :系统, :shell, :! <命令> 执行系统命令");

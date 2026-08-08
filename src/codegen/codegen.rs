@@ -623,6 +623,17 @@ impl CodeGenerator {
         // 读取行
         emit_if_new(&mut self.ir, "declare i8* @rt_readline()", extern_funcs);
 
+        // 协程调度器（异步支持，轻量协程最小基元）
+        emit_if_new(&mut self.ir, "declare void @rt_coro_reset()", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_coro_count()", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_coro_spawn(i8*, i64)", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_coro_exists(i64)", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_coro_is_done(i64)", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_coro_resume(i64)", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_coro_await(i64)", extern_funcs);
+        emit_if_new(&mut self.ir, "declare i64 @rt_coro_tick()", extern_funcs);
+        emit_if_new(&mut self.ir, "declare void @rt_coro_run_all()", extern_funcs);
+
         // 字符串比较函数
         emit_if_new(&mut self.ir, "declare i64 @rt_str_eq(i8*, i8*)", extern_funcs);
         emit_if_new(&mut self.ir, "declare i64 @rt_str_ne(i8*, i8*)", extern_funcs);
@@ -1190,8 +1201,8 @@ impl CodeGenerator {
                     return Err(CodegenError::new("continue语句只能在循环中使用"));
                 }
             }
-            Stmt::Match(_) => {
-                return Err(CodegenError::unsupported_feature("模式匹配语句(Match)"));
+            Stmt::Match(match_stmt) => {
+                self.generate_match_stmt(match_stmt)?;
             }
             Stmt::Block(block) => {
                 // 块语句：递归生成块内语句
@@ -1360,6 +1371,114 @@ impl CodeGenerator {
             self.emit(&format!("L{}:", end_label));
         }
         Ok(())
+    }
+
+    /**
+     * 生成模式匹配语句
+     * 匹配 值 {
+     *     情况 变体 => { ... }
+     *     默认 => { ... }
+     * }
+     * 通过 icmp eq 对 subject 与各变体判别值比较，命中分支后执行分支体。
+     */
+    fn generate_match_stmt(&mut self, match_stmt: &MatchStmt) -> Result<(), CodegenError> {
+        // 生成 subject 表达式（枚举判别值以 i64 存储）
+        let subject_val = self.generate_expression(&match_stmt.subject)?;
+        let subject_type = self.infer_expression_type(&match_stmt.subject);
+
+        // 若 subject 不是 i64，需要先转换（枚举判别值按 i64 比较）
+        let subject_for_cmp = if subject_type != "i64" && subject_type != "" {
+            self.generate_type_conversion(&subject_val, &subject_type, "i64")
+        } else {
+            subject_val.clone()
+        };
+
+        // 分配 end 标签（所有分支汇合点）
+        let end_label = self.label_counter;
+        self.label_counter += 1;
+
+        // 为每个分支分配「入口标签」：
+        // - 枚举变体：check 标签（比较后 fall-through 的下一分支入口）
+        // - 默认分支：body 标签（直接进入，不需要检查）
+        let mut entry_labels: Vec<usize> = Vec::new();
+        for _arm in &match_stmt.arms {
+            let lbl = self.label_counter;
+            self.label_counter += 1;
+            entry_labels.push(lbl);
+        }
+
+        for (i, arm) in match_stmt.arms.iter().enumerate() {
+            let entry = entry_labels[i];
+            // 当前分支入口标签（首个分支需要先 br 到达）
+            if i == 0 {
+                self.emit(&format!("    br label %L{}", entry));
+            }
+            self.emit(&format!("L{}:", entry));
+
+            match &arm.pattern {
+                MatchPattern::EnumVariant { variant_name, fields, .. } => {
+                    // 查找变体的判别值
+                    let disc = self.enum_values.get(variant_name.as_str()).copied()
+                        .unwrap_or_else(|| Self::builtin_variant_value(variant_name));
+
+                    // 比较 subject 与判别值
+                    let cmp = self.new_label("match_cmp");
+                    self.emit(&format!("    %{} = icmp eq i64 %{}, {}", cmp, subject_for_cmp, disc));
+                    let body_label = self.label_counter;
+                    self.label_counter += 1;
+                    // 下一分支入口（若无则跳转 end）
+                    let next_label = entry_labels.get(i + 1).copied().unwrap_or(end_label);
+                    self.emit(&format!("    br i1 %{}, label %L{}, label %L{}", cmp, body_label, next_label));
+
+                    // 命中分支：绑定字段变量后执行分支体
+                    self.emit(&format!("L{}:", body_label));
+                    for binding in fields {
+                        let alloca = self.new_label(&format!("{}_alloca", binding.binding_name));
+                        self.emit(&format!("    %{} = alloca i64, align 8", alloca));
+                        self.emit(&format!("    store i64 0, i64* %{}", alloca));
+                        self.variables.insert(binding.binding_name.clone(), alloca);
+                        self.variable_types.insert(binding.binding_name.clone(), "i64".to_string());
+                    }
+                    self.generate_arm_body(&arm.body)?;
+                    self.emit(&format!("    br label %L{}", end_label));
+                }
+                MatchPattern::Wildcard => {
+                    // 通配符分支：直接执行分支体
+                    self.generate_arm_body(&arm.body)?;
+                    self.emit(&format!("    br label %L{}", end_label));
+                }
+            }
+        }
+
+        // 所有分支汇合点
+        self.emit(&format!("L{}:", end_label));
+        Ok(())
+    }
+
+    /**
+     * 生成匹配分支体（支持块语句或单语句）
+     */
+    fn generate_arm_body(&mut self, body: &Stmt) -> Result<(), CodegenError> {
+        match body {
+            Stmt::Block(block) => self.generate_block(block),
+            other => self.generate_statement(other),
+        }
+    }
+
+    /**
+     * 内置枚举变体的默认判别值（与 generate_expression 的硬编码表保持一致）
+     */
+    fn builtin_variant_value(name: &str) -> i64 {
+        match name {
+            "None" | "Init" | "Void" => 0,
+            "Lexing" | "Func" | "Int" | "Red" | "红" => 1,
+            "Parsing" | "Struct" | "Float" | "Green" | "绿" => 2,
+            "Sema" | "Enum" | "Bool" | "Blue" | "蓝" => 3,
+            "Codegen" | "Constant" | "String" | "TypeAlias" => 4,
+            "Runtime" | "Variable" | "Char" | "Macro" => 5,
+            "Error" | "Import" | "Void_" => 7,
+            _ => 0,
+        }
     }
 
     /**
@@ -1835,11 +1954,19 @@ impl CodeGenerator {
                 self.generate_expression(expr)
             }
             Expr::Await(await_expr) => {
-                // Await 表达式：生成等待异步操作的代码
-                // 简化实现：直接生成被等待的表达式
+                // Await 表达式：等待协程任务完成并获取结果
                 let inner_val = self.generate_expression(&await_expr.expr)?;
-                // TODO: 实现完整的异步运行时支持
-                Ok(inner_val)
+                let inner_type = self.infer_expression_type(&await_expr.expr);
+                // 协程句柄为 i64 时，生成 rt_coro_await 等待结果
+                if inner_type == "i64" {
+                    let result = self.new_label("await_result");
+                    self.emit(&format!("    %{} = call i64 @rt_coro_await(i64 %{})", result, inner_val));
+                    self.variable_types.insert(result.clone(), "i64".to_string());
+                    Ok(result)
+                } else {
+                    // 非 i64 句柄（如文本/Future 描述），暂透传
+                    Ok(inner_val)
+                }
             }
             Expr::ListLiteral(list) => {
                 // 创建列表

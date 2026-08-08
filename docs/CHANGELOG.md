@@ -1,5 +1,28 @@
 # 玄语编译器 v0.2.0-beta 发布说明
 
+## 开发版更新（v0.3.0 准备期，未发布）
+
+本段记录为 v0.3.0（模式匹配 / 异步 / 调试器 / 发布包）做准备的开发变更，尚未打版本号。
+
+### 新增
+- **模式匹配最小可用 codegen**：`匹配` 语句（枚举变体 `icmp eq` 判别链 + 字段绑定 + `默认` 分支）已可实现，配套 e2e 测试接入 CI
+- **协程调度器原语（runtime）**：`rt_coro_spawn/resume/await/tick/run_all` 等 C 基座已加入 runtime.c，供异步状态机使用
+- **`等待` codegen 接线**：`Expr::Await` 从透传升级为调用 `rt_coro_await`（i64 协程句柄等待结果）
+- **调试器骨架**：CLI 新增 `--debug` 标志输出「源码行号 → 函数」映射；REPL 新增 `:断点`/`:继续`/`:单步` 命令占位
+- **发布打包脚本**：`build/release.ps1` 产出 `dist/xuanyu-<版本>/` 分发目录与 zip，含 xy / runtime.c / xyc.xy / 示例 / 文档 / VERSION，并在打包后自检
+- **版本号统一**：新增 `version!()` 宏（读取 Cargo.toml），main / REPL / 包管理器统一使用，消除硬编码版本串
+
+### 测试
+- lexer：新增 match/async 关键字与英文别名测试（32→22 结构重组，全绿）
+- parser：新增 match 语句（简单/字段绑定/默认/命名绑定）与 await（表达式/标识符/语句）测试（37 全绿）
+- codegen：新增 match 语句判别跳转与语法测试（26 全绿）
+- e2e：`tests/integration/match_test.xy` 通过并接入 CI；`tests/integration/async_test.xy` 标记预期失败（待 v0.3.0 状态机）
+
+### 修复
+- parser 兼容 `=>` 箭头 token（原 lexer 将 `=>` 生成为单个 `箭头` token，parser 曾期望 `>`+`=` 两个 token）
+
+---
+
 ## 版本概述
 
 **玄语**（XY Language）是一门以中文为原生语法的编译型编程语言，基于 LLVM 构建，支持自举编译。本版本为 `v0.2.0-beta`，标志着自举验证通过：L2 编译器（XY 实现）已可由 L1（Rust）成功编译为可执行文件，且编译自身生成的 IR 与 L1 完全一致。

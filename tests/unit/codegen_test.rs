@@ -265,4 +265,40 @@ mod codegen_tests {
         
         assert!(parser.parse_expression().is_ok());
     }
+
+    // ============ 模式匹配代码生成测试 ============
+
+    #[test]
+    fn test_match_statement_codegen() {
+        // 简单枚举 + 匹配：验证生成 icmp eq 判别跳转
+        let source = "枚举 颜色 { 红, 绿, 蓝 }
+函数 主(): 整数 {
+    定义 颜色值 = 红
+    定义 可变 结果: 整数 = 0
+    匹配 颜色值 {
+        情况 红 => { 结果 = 1 }
+        情况 绿 => { 结果 = 2 }
+        默认 => { 结果 = 0 }
+    }
+    返回 结果
+}".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let module = parser.parse_module().unwrap();
+        let ir = generate_ir(&module).unwrap();
+
+        assert!(ir.contains("icmp eq i64"), "生成的 IR 应包含 icmp eq 判别比较:\n{}", ir);
+        assert!(ir.contains("br i1"), "生成的 IR 应包含 br i1 跳转:\n{}", ir);
+        assert!(ir.contains("%match_cmp"), "生成的 IR 应包含 match_cmp 标签:\n{}", ir);
+    }
+
+    #[test]
+    fn test_match_syntax_unit() {
+        // 校验 Match 语句不再报 unsupported_feature
+        let source = "匹配 颜色 { 情况 红 => { 打印(1) } 默认 => { 打印(0) } }".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmt = parser.parse_statement().unwrap();
+        assert!(matches!(stmt, xuanyu::Stmt::Match(_)));
+    }
 }

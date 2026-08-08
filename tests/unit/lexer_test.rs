@@ -70,6 +70,47 @@ mod lexer_tests {
         assert!(has_else, "应包含否则或否则若关键字");
     }
 
+    // ============ 模式匹配 / 异步关键字测试 ============
+
+    #[test]
+    fn test_match_keywords() {
+        // 测试模式匹配关键字
+        let source = "匹配 情况 默认".to_string();
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+
+        assert_eq!(tokens[0].token_type, TokenType::Keyword(Keyword::匹配));
+        assert_eq!(tokens[1].token_type, TokenType::Keyword(Keyword::情况));
+        assert_eq!(tokens[2].token_type, TokenType::Keyword(Keyword::默认));
+    }
+
+    #[test]
+    fn test_async_keywords() {
+        // 测试异步关键字
+        let source = "异步 等待 启动".to_string();
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+
+        assert_eq!(tokens[0].token_type, TokenType::Keyword(Keyword::异步));
+        assert_eq!(tokens[1].token_type, TokenType::Keyword(Keyword::等待));
+        assert_eq!(tokens[2].token_type, TokenType::Keyword(Keyword::启动));
+    }
+
+    #[test]
+    fn test_match_keywords_english_aliases() {
+        // 测试英文别名：match/case/default/async/await/spawn
+        let source = "match case default async await spawn".to_string();
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+
+        assert_eq!(tokens[0].token_type, TokenType::Keyword(Keyword::匹配));
+        assert_eq!(tokens[1].token_type, TokenType::Keyword(Keyword::情况));
+        assert_eq!(tokens[2].token_type, TokenType::Keyword(Keyword::默认));
+        assert_eq!(tokens[3].token_type, TokenType::Keyword(Keyword::异步));
+        assert_eq!(tokens[4].token_type, TokenType::Keyword(Keyword::等待));
+        assert_eq!(tokens[5].token_type, TokenType::Keyword(Keyword::启动));
+    }
+
     // ============ 标识符测试 ============
 
     #[test]

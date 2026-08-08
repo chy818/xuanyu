@@ -6,6 +6,7 @@
 
 #[cfg(test)]
 mod parser_tests {
+    use xuanyu::ast::{ASTNode, MatchPattern};
     use xuanyu::lexer::lexer::Lexer;
     use xuanyu::parser::parser::Parser;
 
@@ -287,6 +288,156 @@ mod parser_tests {
         let tokens = Lexer::new(source).tokenize().unwrap();
         let mut parser = Parser::new(tokens);
         
+        assert!(parser.parse_statement().is_ok());
+    }
+
+    // ============ 模式匹配语句测试 ============
+
+    #[test]
+    fn test_simple_match_statement() {
+        // 匹配 颜色 { 情况 红 => { ... } }
+        let source = "匹配 颜色 { 情况 红 => { 打印(\"红色\") } }".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmt = parser.parse_statement().unwrap();
+
+        match stmt {
+            xuanyu::Stmt::Match(m) => {
+                assert_eq!(m.arms.len(), 1);
+                match &m.arms[0].pattern {
+                    MatchPattern::EnumVariant { variant_name, .. } => {
+                        assert_eq!(variant_name, "红");
+                    }
+                    _ => panic!("期望枚举变体模式"),
+                }
+            }
+            _ => panic!("期望 Match 语句"),
+        }
+    }
+
+    #[test]
+    fn test_match_with_field_bindings() {
+        // 带字段绑定的匹配：情况 加法(左, 右) => ...
+        let source = "匹配 表达式 { 情况 加法(左, 右) => { 返回 左 + 右 } }".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmt = parser.parse_statement().unwrap();
+
+        match stmt {
+            xuanyu::Stmt::Match(m) => {
+                assert_eq!(m.arms.len(), 1);
+                match &m.arms[0].pattern {
+                    MatchPattern::EnumVariant { variant_name, fields, .. } => {
+                        assert_eq!(variant_name, "加法");
+                        assert_eq!(fields.len(), 2);
+                        assert_eq!(fields[0].binding_name, "左");
+                        assert_eq!(fields[1].binding_name, "右");
+                    }
+                    _ => panic!("期望枚举变体模式"),
+                }
+            }
+            _ => panic!("期望 Match 语句"),
+        }
+    }
+
+    #[test]
+    fn test_match_with_wildcard_default() {
+        // 带默认分支的模式匹配
+        let source = "匹配 颜色 { 情况 红 => { 打印(1) } 默认 => { 打印(0) } }".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmt = parser.parse_statement().unwrap();
+
+        match stmt {
+            xuanyu::Stmt::Match(m) => {
+                assert_eq!(m.arms.len(), 2);
+                assert!(matches!(m.arms[0].pattern, MatchPattern::EnumVariant { .. }));
+                assert!(matches!(m.arms[1].pattern, MatchPattern::Wildcard));
+            }
+            _ => panic!("期望 Match 语句"),
+        }
+    }
+
+    #[test]
+    fn test_match_multiple_arms() {
+        // 多分支 + 默认
+        let source = "匹配 颜色 { 情况 红 => { 打印(1) } 情况 绿 => { 打印(2) } 情况 蓝 => { 打印(3) } 默认 => { 打印(0) } }".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmt = parser.parse_statement().unwrap();
+
+        match stmt {
+            xuanyu::Stmt::Match(m) => {
+                assert_eq!(m.arms.len(), 4);
+                assert_eq!(m.subject.span().start_line, 1);
+            }
+            _ => panic!("期望 Match 语句"),
+        }
+    }
+
+    #[test]
+    fn test_match_named_field_bindings() {
+        // 命名字段绑定: 情况 点(x: px, y: py) => ...
+        let source = "匹配 点 { 情况 点(x: px, y: py) => { 返回 px } }".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmt = parser.parse_statement().unwrap();
+
+        match stmt {
+            xuanyu::Stmt::Match(m) => {
+                match &m.arms[0].pattern {
+                    MatchPattern::EnumVariant { fields, .. } => {
+                        assert_eq!(fields.len(), 2);
+                        assert_eq!(fields[0].name.as_deref(), Some("x"));
+                        assert_eq!(fields[0].binding_name, "px");
+                        assert_eq!(fields[1].name.as_deref(), Some("y"));
+                        assert_eq!(fields[1].binding_name, "py");
+                    }
+                    _ => panic!("期望枚举变体模式"),
+                }
+            }
+            _ => panic!("期望 Match 语句"),
+        }
+    }
+
+    // ============ 异步 / 等待 表达式测试 ============
+
+    #[test]
+    fn test_await_expression() {
+        let source = "等待 异步函数()".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let expr = parser.parse_expression().unwrap();
+
+        match expr {
+            xuanyu::Expr::Await(_) => {}
+            other => panic!("期望 Await 表达式，得到 {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_await_with_identifier() {
+        let source = "等待 future".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let expr = parser.parse_expression().unwrap();
+
+        match expr {
+            xuanyu::Expr::Await(await_expr) => {
+                match &*await_expr.expr {
+                    xuanyu::Expr::Identifier(ident) => assert_eq!(ident.name, "future"),
+                    other => panic!("期望 Await 内部为标识符，得到 {:?}", other),
+                }
+            }
+            other => panic!("期望 Await 表达式，得到 {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_await_statement() {
+        let source = "等待 获取数据()".to_string();
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
         assert!(parser.parse_statement().is_ok());
     }
 }

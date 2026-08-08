@@ -1000,4 +1000,110 @@ int64_t rt_list_isEmpty_impl(void* list_ptr) {
     return rt_list_isEmpty(list_ptr);
 }
 
+/* ================================================================
+ * 协程调度器（轻量状态机最小基元）
+ * ----------------------------------------------------------------
+ * 设计背景：v0.3.0 异步采用「轻量协程」模型：
+ *   - 异步函数编译为状态机（state + resume），启动/等待 生成挂起/恢复
+ *   - 本文件提供调度器的 C 基座：spawn / run / await / yield 原语
+ * 最小可行性说明（prep 阶段）：
+ *   - 协程以 函数指针 + 单个 i64 参数 + 返回值 的约定运行
+ *   - 完整的状态机转换(codegen_s)属于 v0.3.0 正式实现，cauto在此打桩
+ *   - 真实并发/挂起语义由后续 codegen 状态机 + 本调度器驱动
+ * ================================================================ */
+
+typedef struct {
+    int64_t (*fn)(int64_t);  /* 协程入口函数 */
+    int64_t arg;              /* 入口参数 */
+    int64_t result;           /* 运行结果 */
+    int active;               /* 是否已被注册 */
+    int done;                 /* 是否已完成 */
+} CoroTask;
+
+#define MAX_CORO_TASKS 256
+static CoroTask g_coro_tasks[MAX_CORO_TASKS];
+static int64_t g_coro_count = 0;
+
+/* 重置调度器（供测试/REPL 使用） */
+void rt_coro_reset(void) {
+    g_coro_count = 0;
+    for (int64_t i = 0; i < MAX_CORO_TASKS; i++) {
+        g_coro_tasks[i].fn = NULL;
+        g_coro_tasks[i].result = 0;
+        g_coro_tasks[i].active = 0;
+        g_coro_tasks[i].done = 0;
+    }
+}
+
+/* 获取当前已注册协程数量 */
+int64_t rt_coro_count(void) {
+    return g_coro_count;
+}
+
+/* 注册一个新协程任务，返回 handle（>=0 成功，-1 失败） */
+int64_t rt_coro_spawn(void* fn, int64_t arg) {
+    if (g_coro_count >= MAX_CORO_TASKS) return -1;
+    for (int64_t i = 0; i < MAX_CORO_TASKS; i++) {
+        if (g_coro_tasks[i].active == 0) {
+            g_coro_tasks[i].fn = (int64_t(*)(int64_t))fn;
+            g_coro_tasks[i].arg = arg;
+            g_coro_tasks[i].result = 0;
+            g_coro_tasks[i].active = 1;
+            g_coro_tasks[i].done = 0;
+            g_coro_count++;
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* 是否存在指定协程任务 */
+int64_t rt_coro_exists(int64_t handle) {
+    if (handle < 0 || handle >= MAX_CORO_TASKS) return 0;
+    return g_coro_tasks[handle].active;
+}
+
+/* 协程是否已完成 */
+int64_t rt_coro_is_done(int64_t handle) {
+    if (handle < 0 || handle >= MAX_CORO_TASKS) return 1;
+    return g_coro_tasks[handle].done;
+}
+
+/* 运行一个协程任务直至完成（同步运行，供等待 使用） */
+int64_t rt_coro_resume(int64_t handle) {
+    if (handle < 0 || handle >= MAX_CORO_TASKS || !g_coro_tasks[handle].active) return 0;
+    CoroTask* task = &g_coro_tasks[handle];
+    if (task->done) return task->result;
+    /* 简单协程：函数执行到返回视为一次 resume 完成 */
+    task->result = task->fn ? task->fn(task->arg) : 0;
+    task->done = 1;
+    return task->result;
+}
+
+/* 等待某个协程完成（真正的 await 语义） */
+int64_t rt_coro_await(int64_t handle) {
+    return rt_coro_resume(handle);
+}
+
+/* 轮流推进所有未完成的协程（一轮 yield），返回本轮推进的数量 */
+int64_t rt_coro_tick(void) {
+    int64_t progressed = 0;
+    for (int64_t i = 0; i < MAX_CORO_TASKS; i++) {
+        if (g_coro_tasks[i].active && !g_coro_tasks[i].done) {
+            rt_coro_resume(i);
+            progressed++;
+        }
+    }
+    return progressed;
+}
+
+/* 运行全部已注册协程直至完成 */
+void rt_coro_run_all(void) {
+    for (int64_t i = 0; i < MAX_CORO_TASKS; i++) {
+        if (g_coro_tasks[i].active && !g_coro_tasks[i].done) {
+            rt_coro_resume(i);
+        }
+    }
+}
+
 /* Entry point - provided by compiled IR module */

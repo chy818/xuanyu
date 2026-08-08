@@ -1,4 +1,4 @@
-# Xuanyu Compiler Test Runner
+﻿# Xuanyu Compiler Test Runner
 # Run all tests and generate report
 
 param(
@@ -17,6 +17,10 @@ $Skipped = 0
 
 # Project paths
 $ProjectRoot = $PSScriptRoot
+# If this script sits in a tests/ subdir of the repo, resolve up to the repo root
+if (Test-Path (Join-Path (Split-Path $ProjectRoot -Parent) "src")) {
+    $ProjectRoot = Split-Path $ProjectRoot -Parent
+}
 $SrcDir = Join-Path $ProjectRoot "src"
 $TestsDir = Join-Path $ProjectRoot "tests"
 $ExamplesDir = Join-Path $ProjectRoot "examples"
@@ -42,8 +46,8 @@ function Print-Title {
 # Check compiler exists
 function Get-Compiler {
     $paths = @(
-        (Join-Path $ProjectRoot "target\debug\xy.exe"),
-        (Join-Path $ProjectRoot "target\release\xy.exe")
+        (Join-Path $ProjectRoot "target\release\xy.exe"),
+        (Join-Path $ProjectRoot "target\debug\xy.exe")
     )
     foreach ($p in $paths) {
         if (Test-Path $p) { return $p }
@@ -61,14 +65,14 @@ function Run-UnitTests {
         cargo test --lib 2>&1 | ForEach-Object {
             if ($_ -match "test result: ok") {
                 Print-Success "Unit tests passed"
-                $Passed++
+                $script:Passed++
             } elseif ($_ -match "FAILED") {
                 Print-Error "Unit tests failed"
-                $Failed++
+                $script:Failed++
             }
             if ($Verbose) { Write-Host $_ -ForegroundColor Gray }
         }
-        $Total++
+        $script:Total++
     } finally {
         Pop-Location
     }
@@ -81,7 +85,7 @@ function Run-IntegrationTests {
     $compiler = Get-Compiler
     if (-not $compiler) {
         Print-Info "Compiler not found. Run: cargo build"
-        $Skipped++
+        $script:Skipped++
         return
     }
     
@@ -89,11 +93,11 @@ function Run-IntegrationTests {
         @{ Path = "tests\integration\operator_test.xy"; Name = "operator_test" },
         @{ Path = "tests\integration\control_flow_test.xy"; Name = "control_flow_test" },
         @{ Path = "tests\integration\list_test.xy"; Name = "list_test" },
+        @{ Path = "tests\integration\match_test.xy"; Name = "match_test" },
         @{ Path = "examples\hello.xy"; Name = "hello" }
-    )
-    
+    )    
     foreach ($test in $testFiles) {
-        $Total++
+        $script:Total++
         $fullPath = Join-Path $ProjectRoot $test.Path
         if (Test-Path $fullPath) {
             $outputFile = Join-Path $OutputDir "$($test.Name).ll"
@@ -102,14 +106,26 @@ function Run-IntegrationTests {
             & $compiler $fullPath --ir-pure 2>&1 | Out-File $outputFile -Encoding UTF8
             if ($LASTEXITCODE -eq 0) {
                 Print-Success $test.Name
-                $Passed++
+                $script:Passed++
             } else {
                 Print-Error $test.Name
-                $Failed++
+                $script:Failed++
             }
         } else {
             Print-Info "File not found: $($test.Path)"
-            $Skipped++
+            $script:Skipped++
+        }
+    }
+
+    # Expected-fail tests (recorded but non-blocking until async lands in v0.3.0)
+    $expectedFailFiles = @(
+        @{ Path = "tests\integration\async_test.xy"; Name = "async_test"; Todo = "v0.3.0 async state machine" }
+    )
+    foreach ($test in $expectedFailFiles) {
+        $fullPath = Join-Path $ProjectRoot $test.Path
+        if (Test-Path $fullPath) {
+            Write-Host "Skipping (expected-fail): $($test.Name) [TODO $($test.Todo)]" -ForegroundColor DarkYellow
+            $script:Skipped++
         }
     }
 }
@@ -121,7 +137,7 @@ function Run-BootstrapTests {
     $compiler = Get-Compiler
     if (-not $compiler) {
         Print-Info "Compiler not found. Run: cargo build"
-        $Skipped++
+        $script:Skipped++
         return
     }
     
@@ -135,7 +151,7 @@ function Run-BootstrapTests {
     )
     
     foreach ($test in $bootstrapFiles) {
-        $Total++
+        $script:Total++
         $fullPath = Join-Path $ProjectRoot $test.Path
         if (Test-Path $fullPath) {
             $outputFile = Join-Path $OutputDir "$($test.Name).ll"
@@ -144,14 +160,14 @@ function Run-BootstrapTests {
             & $compiler $fullPath --ir-pure 2>&1 | Out-File $outputFile -Encoding UTF8
             if ($LASTEXITCODE -eq 0) {
                 Print-Success $test.Name
-                $Passed++
+                $script:Passed++
             } else {
                 Print-Error $test.Name
-                $Failed++
+                $script:Failed++
             }
         } else {
             Print-Info "File not found: $($test.Path)"
-            $Skipped++
+            $script:Skipped++
         }
     }
 }

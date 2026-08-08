@@ -1243,9 +1243,11 @@ impl Parser {
                     self.expect(&TokenType::右圆括号)?; // 消耗 ')'
                 }
                 
-                // 期望 '=>'
-                self.expect(&TokenType::大于)?;
-                self.expect(&TokenType::赋值)?;
+                // 期望 '=>'（可能是一个 箭头 token，也可能是 大于 + 赋值 两个 token）
+                if !self.match_token(&TokenType::箭头) {
+                    self.expect(&TokenType::大于)?;
+                    self.expect(&TokenType::赋值)?;
+                }
                 
                 // 解析分支体
                 let body = Box::new(self.parse_statement()?);
@@ -1262,9 +1264,11 @@ impl Parser {
             } else if self.check_keyword(&Keyword::默认) {
                 self.advance(); // 消耗 '默认'
                 
-                // 期望 '=>'
-                self.expect(&TokenType::大于)?;
-                self.expect(&TokenType::赋值)?;
+                // 期望 '=>'（可能是一个 箭头 token，也可能是 大于 + 赋值 两个 token）
+                if !self.match_token(&TokenType::箭头) {
+                    self.expect(&TokenType::大于)?;
+                    self.expect(&TokenType::赋值)?;
+                }
                 
                 // 解析分支体
                 let body = Box::new(self.parse_statement()?);

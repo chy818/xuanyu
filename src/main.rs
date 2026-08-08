@@ -45,6 +45,7 @@ fn main() {
     // 解析参数
     let mut input_file = String::new();
     let mut run_mode = RunMode::IrOnly; // 默认只生成 IR
+    let mut debug_mode = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -80,6 +81,10 @@ fn main() {
                     exit(1);
                 }
             }
+            "--debug" => {
+                debug_mode = true;
+                i += 1;
+            }
             "repl" | "--repl" | "-i" => {
                 // 启动 REPL 模式
                 xuanyu::start_repl(None);
@@ -101,7 +106,7 @@ fn main() {
     }
 
     // 执行编译流程
-    if let Err(e) = compile_file(&input_file, run_mode) {
+    if let Err(e) = compile_file(&input_file, run_mode, debug_mode) {
         eprintln!("编译失败: {}", e);
         exit(1);
     }
@@ -116,20 +121,20 @@ enum RunMode {
     Run,     // 编译并运行
 }
 
-fn compile_file(filename: &str, mode: RunMode) -> Result<(), String> {
+fn compile_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), String> {
     // 默认使用多文件编译（支持引入解析）
     let is_multi_file = filename.ends_with(".xy") && Path::new(filename).exists();
 
     if is_multi_file {
         // 多文件编译（自动解析引入语句）
-        compile_multi_file(filename, mode)
+        compile_multi_file(filename, mode, debug)
     } else {
         // 单文件编译
-        compile_single_file(filename, mode)
+        compile_single_file(filename, mode, debug)
     }
 }
 
-fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
+fn compile_single_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), String> {
     // 读取源文件
     let source = fs::read_to_string(filename)
         .map_err(|e| format!("无法读取文件 '{}': {}", filename, e))?;
@@ -207,6 +212,17 @@ fn compile_single_file(filename: &str, mode: RunMode) -> Result<(), String> {
 
     if mode != RunMode::IrPure {
         println!("语义分析完成，无错误");
+    }
+
+    // ========== 调试模式：输出行号映射骨架 ==========
+    if debug {
+        println!("\n=== 调试模式 (--debug) ===");
+        println!("[最小版] 输出源码行号 -> 函数 映射骨架，真实断点/单步待 v0.3.0 接入");
+        let mapping = xuanyu::build_line_mapping(&ast);
+        for (line, func_name, desc) in &mapping.entries {
+            println!("  第 {:4} 行: {} ({})", line, func_name, desc);
+        }
+        println!("映射记录数: {}", mapping.entries.len());
     }
 
     // ========== 代码生成 ==========
@@ -489,7 +505,7 @@ fn update_stmt_function_names(stmt: &mut xuanyu::ast::Stmt, module_name: &str, f
     }
 }
 
-fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
+fn compile_multi_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), String> {
     // 如果是纯 IR 模式，不输出调试信息
     if mode != RunMode::IrPure {
         println!("正在编译多文件项目: {}", filename);
@@ -635,6 +651,17 @@ fn compile_multi_file(filename: &str, mode: RunMode) -> Result<(), String> {
 
     if mode != RunMode::IrPure {
         println!("语义分析完成，无错误");
+    }
+
+    // ========== 调试模式：输出行号映射骨架 ==========
+    if debug {
+        println!("\n=== 调试模式 (--debug) ===");
+        println!("[最小版] 输出源码行号 -> 函数 映射骨架，真实断点/单步待 v0.3.0 接入");
+        let mapping = xuanyu::build_line_mapping(&merged_module);
+        for (line, func_name, desc) in &mapping.entries {
+            println!("  第 {:6} 行: {} ({})", line, func_name, desc);
+        }
+        println!("映射记录数: {}", mapping.entries.len());
     }
 
     // 一次性生成合并后的 IR
@@ -889,7 +916,7 @@ fn update_cache(filename: &str, source: &str) -> Result<(), String> {
 }
 
 fn print_usage(program: &str) {
-    println!("CCAS 玄语编译器 (xuanyu) v0.2.0-beta");
+    println!("CCAS 玄语编译器 (xuanyu) {}", xuanyu::version!());
     println!();
     println!("用法: {} <源文件> [选项]", program);
     println!("      {} repl [选项]", program);
@@ -903,10 +930,12 @@ fn print_usage(program: &str) {
     println!("  --ir-pure     只输出纯 LLVM IR (无调试信息)");
     println!("  --build       生成可执行文件");
     println!("  --run         编译并运行程序");
+    println!("  --debug       调试模式：输出源码行号映射骨架 (v0.3.0 最小版)");
     println!();
     println!("示例:");
     println!("  {} hello.xy          只生成 IR", program);
     println!("  {} hello.xy --build  生成可执行文件", program);
     println!("  {} hello.xy --run    编译并运行", program);
+    println!("  {} hello.xy --debug  输出调试行号映射", program);
     println!("  {} repl              启动交互式环境", program);
 }
