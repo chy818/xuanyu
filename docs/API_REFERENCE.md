@@ -497,6 +497,6 @@ xy program.xy --debug --build
 
 ## 版本信息
 
-- 文档版本: v0.3.0-beta
-- 语言版本: v0.3.0-beta
+- 文档版本: v0.4.0-alpha
+- 语言版本: v0.4.0-alpha
 - 最后更新: 2026-08-09

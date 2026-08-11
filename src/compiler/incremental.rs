@@ -421,6 +421,39 @@ impl IncrementalCompiler {
     }
 
     /**
+     * 获取全部模块信息的快照（用于后续与最新状态比对）
+     */
+    pub fn get_modules_map(&self) -> HashMap<String, ModuleInfo> {
+        self.modules.clone()
+    }
+
+    /**
+     * 与历史快照比对，返回自上次构建以来发生变更的模块名集合。
+     * - 新出现 / 已删除 / 内容哈希或修改时间变化的模块均视为变更。
+     */
+    pub fn changed_since(&self, previous: &HashMap<String, ModuleInfo>) -> HashSet<String> {
+        let mut changed = HashSet::new();
+        for (name, cur) in &self.modules {
+            match previous.get(name) {
+                Some(prev) => {
+                    if prev.content_hash != cur.content_hash || prev.last_modified != cur.last_modified {
+                        changed.insert(name.clone());
+                    }
+                }
+                None => {
+                    changed.insert(name.clone());
+                }
+            }
+        }
+        for prev_name in previous.keys() {
+            if !self.modules.contains_key(prev_name) {
+                changed.insert(prev_name.clone());
+            }
+        }
+        changed
+    }
+
+    /**
      * 获取模块信息
      */
     pub fn get_module(&self, name: &str) -> Option<&ModuleInfo> {
@@ -464,6 +497,10 @@ impl IncrementalCompiler {
      * 保存构建状态到缓存
      */
     pub fn save_state(&self) -> Result<(), IncrCompileError> {
+        // 确保缓存目录存在（首次构建时可能尚未创建）
+        fs::create_dir_all(&self.cache_dir)
+            .map_err(|e| IncrCompileError::IoError(e.to_string()))?;
+
         let state_file = self.cache_dir.join("build_state.json");
         
         let state = BuildState {
@@ -599,5 +636,98 @@ mod tests {
 
         // 由于没有依赖关系，结果顺序可能不同
         assert_eq!(sorted.len(), 3);
+    }
+
+    #[test]
+    fn test_save_load_state_roundtrip() {
+        // 使用唯一缓存目录，避免多个测试并发互相干扰
+        let cache_dir = std::env::temp_dir().join(format!("xuanyu_cache_roundtrip_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&cache_dir);
+
+        let temp_file = std::env::temp_dir().join("roundtrip_module.xy");
+        fs::write(&temp_file, "函数 测试() { 返回 0 }").unwrap();
+
+        // 第一次：注册并保存状态
+        {
+            let mut compiler = IncrementalCompiler::new(cache_dir.clone());
+            compiler.register_module(temp_file.clone(), "roundtrip".to_string(), vec![]).unwrap();
+            compiler.save_state().unwrap();
+        }
+
+        // 第二次：重新加载，模块应存在于状态中且无需重建
+        {
+            let mut compiler = IncrementalCompiler::new(cache_dir.clone());
+            compiler.load_state().unwrap();
+            let stored = compiler.get_modules_map();
+            assert!(stored.contains_key("roundtrip"), "状态应包含已注册模块");
+        }
+
+        let _ = fs::remove_dir_all(&cache_dir);
+    }
+
+    #[test]
+    fn test_changed_since_detects_modification() {
+        let cache_dir = std::env::temp_dir().join(format!("xuanyu_cache_modify_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&cache_dir);
+
+        let temp_file = std::env::temp_dir().join("changed_module.xy");
+        fs::write(&temp_file, "函数 A() { 返回 1 }").unwrap();
+
+        let mut compiler = IncrementalCompiler::new(cache_dir.clone());
+        compiler.register_module(temp_file.clone(), "mod_a".to_string(), vec![]).unwrap();
+        compiler.save_state().unwrap();
+
+        // 载入历史快照，再重新注册（内容已修改）→ 应检测到变更
+        {
+            compiler.load_state().unwrap();
+            let prev = compiler.get_modules_map();
+            compiler.register_module(temp_file.clone(), "mod_a".to_string(), vec![]).unwrap();
+            let changed = compiler.changed_since(&prev);
+            assert!(changed.is_empty(), "内容未变时不应检测到变更");
+        }
+
+        // 修改文件内容后重新注册 → 应检测到变更
+        {
+            fs::write(&temp_file, "函数 A() { 返回 2 }").unwrap();
+            compiler.load_state().unwrap();
+            let prev = compiler.get_modules_map();
+            compiler.register_module(temp_file.clone(), "mod_a".to_string(), vec![]).unwrap();
+            let changed = compiler.changed_since(&prev);
+            assert!(changed.contains("mod_a"), "内容修改后应检测到变更，got {:?}", changed);
+        }
+
+        let _ = fs::remove_dir_all(&cache_dir);
+    }
+
+    #[test]
+    fn test_changed_since_detects_deletion() {
+        let cache_dir = std::env::temp_dir().join(format!("xuanyu_cache_deletion_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&cache_dir);
+
+        // 历史状态：登记 mod_b 并保存
+        let temp_file = std::env::temp_dir().join("deleted_module.xy");
+        fs::write(&temp_file, "函数 B() { 返回 0 }").unwrap();
+
+        let keeper = std::env::temp_dir().join("kept_module.xy");
+        fs::write(&keeper, "函数 K() { 返回 1 }").unwrap();
+
+        let mut compiler = IncrementalCompiler::new(cache_dir.clone());
+        compiler.register_module(temp_file.clone(), "mod_b".to_string(), vec![]).unwrap();
+        compiler.save_state().unwrap();
+
+        // 下一次构建：mod_b 已被删除，仅登记存活模块 → 历史中的 mod_b 应视为变更
+        // （与 MultiFileCompiler::incremental_change_set 的比对流程保持一致：
+        //   历史快照与「当前存活模块集」分别用两个实例承载）
+        let mut snap = IncrementalCompiler::new(cache_dir.clone());
+        snap.load_state().unwrap();
+        let prev = snap.get_modules_map();
+
+        let mut current = IncrementalCompiler::new(cache_dir.clone());
+        current.register_module(keeper, "mod_kept".to_string(), vec![]).unwrap();
+        let changed = current.changed_since(&prev);
+        assert!(changed.contains("mod_b"), "已删除模块应视为变更，got {:?}", changed);
+        assert!(changed.contains("mod_kept"), "新增模块应视为变更，got {:?}", changed);
+
+        let _ = fs::remove_dir_all(&cache_dir);
     }
 }

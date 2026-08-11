@@ -54,7 +54,7 @@ cargo run -- examples/hello.xy --debug --build
 ### 输出示例
 
 ```
-CCAS 玄语编译器 (xuanyu) v0.3.0-beta
+CCAS 玄语编译器 (xuanyu) v0.4.0-alpha
 
 === 模块依赖 ===
 共编译 1 个模块:
@@ -102,7 +102,7 @@ xuanyu/
 │   ├── compiler/               # 编译器核心
 │   │   ├── mod.rs
 │   │   ├── module.rs          # 模块解析
-│   │   └── incremental.rs     # 增量编译（计划中，未接入主编译流程）
+│   │   └── incremental.rs     # 增量编译（v0.4.0 接入主编译管线，见 tasks/plan_v040.md）
 │   ├── package/                # 包管理
 │   │   └── mod.rs
 │   └── compiler_v2/            # L2: XY 自举编译器（自举验证通过）
@@ -458,15 +458,35 @@ $ XY_ERROR_LANG=both cargo run -- examples/hello.xy --run
 
 ```bash
 # 跨平台 bash 脚本（Windows Git Bash / Linux / macOS 均可使用）
-bash build/release.sh v0.3.0-beta
+bash build/release.sh v0.4.0-alpha
 
 # Windows 原生 PowerShell（仅 Windows）
-powershell -ExecutionPolicy Bypass -File build/release.ps1 v0.3.0-beta
+powershell -ExecutionPolicy Bypass -File build/release.ps1 v0.4.0-alpha
 ```
 
 打包产物：`dist/xuanyu-<版本>/` 目录 + `.zip`（Windows）或 `.tar.gz`（Linux/macOS），内含 `xy` 编译器、`runtime.c` 运行时库、`xyc.xy` L2 自举源码、`examples/` 示例、`docs/` 文档与 `VERSION` 文件，并在打包后进行「产物可编译 hello.xy」自检。
 
 CI 通过 GitHub Actions 在 tag 推送 (`v*`) 时自动触发三平台构建并上传 artifact。
+
+### 增量编译 (v0.4.0)
+
+`xy` 支持检测级增量编译：通过文件内容哈希比对，未变更的项目二次构建直接**复用缓存产物**（IR 与可执行文件），跳过代码生成、LLVM 编译与链接等耗时阶段。
+
+```bash
+# 首次构建：全量编译并写入缓存（.cache/xuanyu/<模块>-<路径哈希>/）
+xy examples/hello.xy --build --incremental
+
+# 再次构建：命中缓存，直接复用产物
+xy examples/hello.xy --build --incremental
+# 输出示例：[增量] N 个模块均未变更，命中缓存
+
+# 运行模式命中缓存时直接执行缓存产物：
+xy examples/hello.xy --run --incremental
+```
+
+**失效规则**：任一模块文件内容变化、模块被新增/删除、`runtime.c` 或编译器版本变化都会使缓存失效并自动全量重编译。缓存目录可通过删除 `.cache/` 手动清理。
+
+> 当前为**检测级增量**（首选准确的变更检测 + 产物复用）；模块级独立 codegen + 链接期符号级增量作为后续扩展（见 `tasks/plan_v040.md`）。
 
 ---
 

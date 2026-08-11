@@ -46,6 +46,7 @@ fn main() {
     let mut input_file = String::new();
     let mut run_mode = RunMode::IrOnly; // 默认只生成 IR
     let mut debug_mode = false;
+    let mut incremental = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -85,6 +86,10 @@ fn main() {
                 debug_mode = true;
                 i += 1;
             }
+            "--incremental" => {
+                incremental = true;
+                i += 1;
+            }
             "repl" | "--repl" | "-i" => {
                 // 启动 REPL 模式
                 xuanyu::start_repl(None);
@@ -106,7 +111,7 @@ fn main() {
     }
 
     // 执行编译流程
-    if let Err(e) = compile_file(&input_file, run_mode, debug_mode) {
+    if let Err(e) = compile_file(&input_file, run_mode, debug_mode, incremental) {
         eprintln!("编译失败: {}", e);
         exit(1);
     }
@@ -121,13 +126,13 @@ enum RunMode {
     Run,     // 编译并运行
 }
 
-fn compile_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), String> {
+fn compile_file(filename: &str, mode: RunMode, debug: bool, incremental: bool) -> Result<(), String> {
     // 默认使用多文件编译（支持引入解析）
     let is_multi_file = filename.ends_with(".xy") && Path::new(filename).exists();
 
     if is_multi_file {
         // 多文件编译（自动解析引入语句）
-        compile_multi_file(filename, mode, debug)
+        compile_multi_file(filename, mode, debug, incremental)
     } else {
         // 单文件编译
         compile_single_file(filename, mode, debug)
@@ -516,7 +521,7 @@ fn update_stmt_function_names(stmt: &mut xuanyu::ast::Stmt, module_name: &str, f
     }
 }
 
-fn compile_multi_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), String> {
+fn compile_multi_file(filename: &str, mode: RunMode, debug: bool, incremental: bool) -> Result<(), String> {
     // 如果是纯 IR 模式，不输出调试信息
     if mode != RunMode::IrPure {
         println!("正在编译多文件项目: {}", filename);
@@ -539,9 +544,35 @@ fn compile_multi_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), 
         .and_then(|stem| stem.to_str())
         .ok_or_else(|| format!("无法解析模块名称: {}", filename))?;
 
-    // 编译模块
-    let modules = compiler.compile(module_name)
-        .map_err(|e| format!("编译失败: {:?}", e))?;
+    // 编译模块（增量模式优先做变更检测）
+    let cache_dir = project_cache_dir(filename);
+    let (modules, reuse_ir) = if incremental {
+        let (modules, changed) = compiler.incremental_change_set(&module_name, &cache_dir)
+            .map_err(|e| format!("增量编译初始化失败: {:?}", e))?;
+
+        let hit = if changed.is_empty() && meta_valid(&cache_dir) {
+            // 无变更且元数据有效，检查缓存产物是否齐全
+            let ir_ok = cache_dir.join("out.ir").exists();
+            let need_exe = matches!(mode, RunMode::Build | RunMode::Run);
+            let exe_ok = !need_exe || cache_dir.join("out.bin").exists();
+            if ir_ok && exe_ok {
+                fs::read_to_string(cache_dir.join("out.ir")).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if hit.is_some() && mode != RunMode::IrPure {
+            println!("[增量] {} 个模块均未变更，命中缓存", modules.len());
+        }
+        (modules, hit)
+    } else {
+        let modules = compiler.compile(&module_name)
+            .map_err(|e| format!("编译失败: {:?}", e))?;
+        (modules, None)
+    };
 
     if mode != RunMode::IrPure {
         println!("\n=== 模块依赖 ===");
@@ -549,6 +580,53 @@ fn compile_multi_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), 
         for (i, module) in modules.iter().enumerate() {
             println!("  {}. {}", i + 1, module.path.display());
         }
+    }
+
+    // 增量缓存命中：复用上一次构建产物，跳过全量编译
+    if let Some(ir) = reuse_ir {
+        match mode {
+            RunMode::IrOnly | RunMode::IrPure => {
+                println!("\n--- LLVM IR (缓存) ---");
+                println!("{}", ir);
+                println!("\n编译成功!（增量缓存命中）");
+            }
+            RunMode::IrFile(filepath) => {
+                fs::write(&filepath, &ir)
+                    .map_err(|e| format!("无法写入 IR 文件: {}", e))?;
+                println!("IR 已写入: {}（增量缓存命中）", filepath);
+            }
+            RunMode::Build => {
+                let exe_cache = cache_dir.join("out.bin");
+                if !exe_cache.exists() {
+                    return Err("缓存产物缺失: out.bin".to_string());
+                }
+                println!("[增量] 缓存构建产物已是最新: {}", exe_cache.display());
+                println!("\n编译成功!（增量缓存命中）");
+            }
+            RunMode::Run => {
+                let exe_cache = cache_dir.join("out.bin");
+                if !exe_cache.exists() {
+                    return Err("缓存产物缺失: out.bin".to_string());
+                }
+                println!("\n--- 运行结果（缓存产物） ---");
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let run_output = Command::new(&exe_cache)
+                    .current_dir(&cwd)
+                    .output()
+                    .map_err(|e| format!("运行失败: {}", e))?;
+                if !run_output.stdout.is_empty() {
+                    print!("{}", String::from_utf8_lossy(&run_output.stdout));
+                }
+                if !run_output.stderr.is_empty() {
+                    eprint!("{}", String::from_utf8_lossy(&run_output.stderr));
+                }
+                if !run_output.status.success() {
+                    return Err(format!("程序退出码: {}", run_output.status.code().unwrap_or(-1)));
+                }
+                println!("----------------");
+            }
+        }
+        return Ok(());
     }
 
     // 将所有模块合并为一个模块，然后一次性生成 IR
@@ -822,6 +900,12 @@ fn compile_multi_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), 
 
             println!("链接成功: {}", output_exe);
 
+            // 增量模式：缓存可执行产物（运行时通过 read-command 执行缓存产物）
+            if incremental {
+                let _ = fs::create_dir_all(&cache_dir);
+                let _ = fs::copy(Path::new(output_exe), cache_dir.join("out.bin"));
+            }
+
             println!("\n编译成功!");
 
             // 如果是运行模式，执行程序
@@ -860,6 +944,13 @@ fn compile_multi_file(filename: &str, mode: RunMode, debug: bool) -> Result<(), 
         }
     }
 
+    // 增量模式：构建成功后缓存 IR 产物与元数据（供下次命中复用）
+    if incremental {
+        let _ = fs::create_dir_all(&cache_dir);
+        let _ = fs::write(cache_dir.join("out.ir"), &combined_ir);
+        save_project_meta(&cache_dir);
+    }
+
     Ok(())
 }
 
@@ -874,6 +965,87 @@ impl Drop for TempFileGuard {
         let _ = fs::remove_file(&self.obj_file);
         let _ = fs::remove_file("runtime.obj");
     }
+}
+
+/* ==================== 增量缓存辅助 ==================== */
+
+/// 项目级缓存目录：.cache/xuanyu/<主模块名>-<路径哈希>/
+/// 以主文件的规范化路径派生哈希，避免不同目录下的同名工程互相污染缓存
+fn project_cache_dir(filename: &str) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let file_path = Path::new(filename);
+    let stem = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("project");
+    let dir_key = fs::canonicalize(file_path.parent().unwrap_or(Path::new(".")))
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    dir_key.hash(&mut hasher);
+    PathBuf::from(".cache")
+        .join("xuanyu")
+        .join(format!("{}-{:016x}", stem, hasher.finish()))
+}
+
+/// 定位 runtime.c（与编译链接时使用的搜索路径保持一致）
+fn find_runtime_source() -> Option<PathBuf> {
+    let exe_dir = env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| env::current_dir().unwrap_or_default());
+    let candidates = vec![
+        exe_dir.join("runtime").join("runtime.c"),
+        Path::new("runtime").join("runtime.c"),
+        Path::new("../runtime/runtime.c").to_path_buf(),
+    ];
+    candidates.into_iter().find(|p| p.exists())
+}
+
+/// 计算文件内容哈希（用于失效检测）
+fn file_content_hash(path: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    if let Ok(content) = fs::read(path) {
+        content.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// 写入缓存元数据：编译器版本 + runtime.c 哈希
+/// 编译器升级或运行时库变化会使缓存失效，强制重编译
+fn save_project_meta(cache_dir: &Path) {
+    let runtime_hash = find_runtime_source()
+        .map(|p| file_content_hash(&p))
+        .unwrap_or(0);
+    let meta = format!(
+        "{{\"schema\":1,\"version\":\"{}\",\"runtime_hash\":{}}}\n",
+        xuanyu::version!(),
+        runtime_hash
+    );
+    let _ = fs::create_dir_all(cache_dir);
+    let _ = fs::write(cache_dir.join("meta.json"), meta);
+}
+
+/// 校验缓存元数据是否与当前编译器/运行时环境一致
+fn meta_valid(cache_dir: &Path) -> bool {
+    let meta_path = cache_dir.join("meta.json");
+    if !meta_path.exists() {
+        return false;
+    }
+    let Ok(content) = fs::read_to_string(&meta_path) else {
+        return false;
+    };
+    // 编译器版本必须一致
+    if !content.contains(xuanyu::version!()) {
+        return false;
+    }
+    // runtime.c 哈希必须一致
+    let runtime_hash = find_runtime_source()
+        .map(|p| file_content_hash(&p))
+        .unwrap_or(0);
+    content.contains(&format!("\"runtime_hash\":{}", runtime_hash))
 }
 
 
@@ -947,11 +1119,13 @@ fn print_usage(program: &str) {
     println!("  --build       生成可执行文件");
     println!("  --run         编译并运行程序");
     println!("  --debug       调试模式：输出源码行号映射骨架 (v0.3.0 最小版)");
+    println!("  --incremental 增量编译：复用缓存产物，显著加快未变更项目的二次构建 (v0.4.0)");
     println!();
     println!("示例:");
     println!("  {} hello.xy          只生成 IR", program);
     println!("  {} hello.xy --build  生成可执行文件", program);
     println!("  {} hello.xy --run    编译并运行", program);
     println!("  {} hello.xy --debug  输出调试行号映射", program);
+    println!("  {} hello.xy --build --incremental  增量编译", program);
     println!("  {} repl              启动交互式环境", program);
 }

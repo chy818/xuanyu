@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::ast::Module;
 use crate::error::CompilerError;
@@ -14,6 +14,7 @@ use crate::LexerError;
 use crate::lexer::Lexer;
 use crate::macro_system::MacroExpander;
 use crate::parser::parse;
+use super::incremental::IncrementalCompiler;
 
 /**
  * 模块信息
@@ -305,6 +306,45 @@ impl MultiFileCompiler {
         }
 
         Ok(modules)
+    }
+
+    /**
+     * 增量变更检测：解析模块图后，与 cache_dir 中的历史构建状态比对，
+     * 返回 (全部模块, 变更模块名集合)。
+     *
+     * - 变更集合为空 ⇒ 可复用缓存产物（缓存命中）。
+     * - 否则需完整重编译（变更的模块及其下游会在编辑产物时失效）。
+     *
+     * 依赖 IncrementalCompiler 的文件哈希/修改时间机制，cache_dir 中的
+     * build_state.json 由调用方在成功构建后通过 save_state 落盘。
+     */
+    pub fn incremental_change_set(
+        &mut self,
+        main_module: &str,
+        cache_dir: &Path,
+    ) -> Result<(Vec<ModuleInfo>, std::collections::HashSet<String>), CompilerError> {
+        // 先解析全部模块（确定当前文件清单与依赖）
+        let modules = self.compile(main_module)?;
+
+        let mut inc = IncrementalCompiler::new(cache_dir.to_path_buf());
+        // 载入上一次构建状态（若存在），并取其快照用于比对
+        let _ = inc.load_state();
+        let prev = inc.get_modules_map();
+
+        // 用全新实例登记「当前存活模块」——确保被删除的模块不会残留复活，
+        // 从而能通过比对历史快照正确检测删除变更
+        let mut current = IncrementalCompiler::new(cache_dir.to_path_buf());
+        for m in &modules {
+            let name = m.path.file_stem().unwrap().to_string_lossy().to_string();
+            let _ = current.register_module(m.path.clone(), name, m.dependencies.clone());
+        }
+        let changed = current.changed_since(&prev);
+
+        // 立即落盘最新文件状态，使下次比对基准始终指向最近一次解析结果。
+        // 命中有效性还依赖产物存在性检查（见 main.rs），因此即使本次构建失败也能正确失效。
+        let _ = current.save_state();
+
+        Ok((modules, changed))
     }
 }
 

@@ -58,6 +58,9 @@ output/
 # 缓存文件
 *.xy.cache
 
+# 增量编译缓存目录
+.cache/
+
 # 根目录下的测试残留文件
 xuanyu_ir_*.ll
 
