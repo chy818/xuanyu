@@ -858,6 +858,12 @@ node.kind = 23  // 结构体字段节点
     condNode = parseExpression(p)
     node.children.追加(condNode)
 
+    /* 消费 '则'（条件后的关键字，与 parseIfStatement 保持一致） */
+    tok = parserPeekToken(p)
+    若 tok.值 == "则" 则 {
+        p.pos = p.pos + 1
+    }
+
     /* 解析循环体（块或单语句） */
     定义 可变 bodyNode: AST节点
     tok = parserPeekToken(p)
