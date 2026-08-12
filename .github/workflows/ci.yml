@@ -102,7 +102,6 @@ jobs:
 
       - name: 编译并运行集成测试
         run: |
-          set -e
           if [ "$RUNNER_OS" = "Windows" ]; then
             XY=target/release/xy.exe
           else
@@ -111,31 +110,39 @@ jobs:
 
           run_xy() {
             local file="$1"; local expect="$2"
+            # 先确认 IR 生成成功
+            if ! "$XY" "$file" --ir 2>&1 | grep -q "编译成功"; then
+              echo "FAIL: $file (IR 生成失败)"
+              return 1
+            fi
+            # 再运行并比对输出
             local out
             out=$("$XY" "$file" --run 2>&1 | sed -n '/--- 运行结果 ---/,$p' | tail -n +2 | sed 's/-----*//g' | grep -v '^$')
             if [ "$out" != "$expect" ]; then
               echo "FAIL: $file"
               echo " 期望: $expect"
               echo " 实际: $out"
-              exit 1
+              return 1
             fi
             echo "PASS: $file"
           }
 
-          run_xy examples/hello.xy "$(printf '85\nPass')"
-          run_xy tests/integration/operator_test.xy "$(printf '=== 运算符测试 ===\n13\n7\n30\n3\n1')"
-          run_xy tests/integration/control_flow_test.xy "$(printf '=== 控制流测试 ===\n良好\n15')"
-          run_xy tests/integration/match_test.xy "$(printf '红色1')"
-          run_xy tests/integration/async_test.xy "$(printf '265')"
+          FAILED=0
+          run_xy examples/hello.xy "$(printf '85\nPass')" || FAILED=1
+          run_xy tests/integration/operator_test.xy "$(printf '=== 运算符测试 ===\n13\n7\n30\n3\n1')" || FAILED=1
+          run_xy tests/integration/control_flow_test.xy "$(printf '=== 控制流测试 ===\n良好\n15')" || FAILED=1
+          run_xy tests/integration/match_test.xy "$(printf '红色1')" || FAILED=1
+          run_xy tests/integration/async_test.xy "$(printf '265')" || FAILED=1
+          if [ "$FAILED" = "1" ]; then exit 1; fi
 
       - name: 宏展开端到端验证
         run: |
-          set -e
           if [ "$RUNNER_OS" = "Windows" ]; then
             XY=target/release/xy.exe
           else
             XY=target/release/xy
           fi
+          "$XY" tests/fixtures/test_macro/macro.xy --ir 2>&1 | grep -q "编译成功" || { echo "FAIL: macro IR 生成"; exit 1; }
           out=$("$XY" tests/fixtures/test_macro/macro.xy --run 2>&1 | sed -n '/--- 运行结果 ---/,$p' | tail -n +2 | sed 's/-----*//g' | grep -v '^$')
           expect="$(printf '42你好，玄语！')"
           if [ "$out" != "$expect" ]; then
