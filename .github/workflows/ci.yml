@@ -100,6 +100,13 @@ jobs:
       - name: 构建编译器
         run: cargo build --release
 
+      - name: 调试：检查 LLVM 工具
+        run: |
+          echo "PATH=$PATH"
+          which llc 2>&1 || echo "llc not found"
+          which clang 2>&1 || echo "clang not found"
+          llc --version 2>&1 | head -1 || echo "llc --version failed"
+
       - name: 编译并运行集成测试
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
