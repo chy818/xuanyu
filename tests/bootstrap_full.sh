@@ -61,6 +61,7 @@ NC='\033[0m'
 
 PASSED=0
 FAILED=0
+HAS_XYC=0  # 是否有 L2 自举编译器（需要 LLVM 工具链）
 
 pass() { echo -e "${GREEN}✓${NC} $1"; PASSED=$((PASSED+1)); }
 fail() { echo -e "${RED}✗${NC} $1"; FAILED=$((FAILED+1)); }
@@ -192,6 +193,7 @@ fi
 info "1d: 链接 → xyc.exe"
 if $CLANG "$XycFullObj" "$RuntimeObj" -o "$XycExe" "-Wl,/SUBSYSTEM:console" 2>&1; then
     pass "链接 → xyc.exe"
+    HAS_XYC=1
 else
     fail "链接失败"
     exit 1
@@ -199,7 +201,8 @@ fi
 else
     info "跳过 llc/clang 链接步骤（LLVM 工具不可用）"
     info "  自举可执行文件构建需要 LLVM，仅验证 IR 生成"
-    XycExe="$XY_COMPILER"  # 回退使用 L1 编译器进行后续测试
+    XycExe=""  # 无 xyc 可用，跳过需要 xyc 的步骤
+    HAS_XYC=0
 fi
 
 # =============================================
@@ -217,8 +220,9 @@ else
     fail "L1 编译测试文件失败"
 fi
 
-# 2b: xyc 编译测试文件 → IR
+# 2b: xyc 编译测试文件 → IR（需要 xyc.exe）
 XycIR="$BUILD_DIR/test_xyc.ll"
+if [ "$HAS_XYC" = "1" ]; then
 info "2b: xyc.exe 编译测试文件"
 xyc_test_out="$BUILD_DIR/xyc_test_out.log"
 if $XycExe "$STANDALONE_TEST" --ir-file "$XycIR" > "$xyc_test_out" 2>&1; then
@@ -237,6 +241,9 @@ if [ -f "$XycIR" ] && [ -f "$L1_IR" ]; then
     info "2c: IR 等价对比 (L1 vs xyc)"
     compare_ir "$L1_IR" "$XycIR" "IR L1 vs xyc"
 fi
+else
+    info "跳过 Stage 2b/2c (xyc.exe 不可用)"
+fi  # HAS_XYC
 
 # =============================================
 # Stage 2.5: 自举回归用例 (async/match 语法验证)
@@ -263,8 +270,8 @@ for bt_entry in "${BOOTSTRAP_TESTS[@]}"; do
         fail "L1 → $bt_name"
     fi
 
-    # xyc 编译 (如果有)
-    if [ -f "$XycExe" ] && [ "$XycExe" != "$XY_COMPILER" ]; then
+    # xyc 编译（需要 xyc.exe）
+    if [ "$HAS_XYC" = "1" ] && [ -n "$XycExe" ]; then
         xyc_bt_out="$BUILD_DIR/bt_xyc_$(basename "${bt_file%.xy}").log"
         if $XycExe "$bt_file" --ir-file /dev/null > "$xyc_bt_out" 2>&1; then
             pass "xyc → $bt_name"
@@ -280,6 +287,7 @@ done
 echo ""
 echo "--- Stage 3: 自举编译 (xyc → xyc_boot) ---"
 
+if [ "$HAS_XYC" = "1" ]; then
 BOOTSTRAP_SRC="$PROJECT_ROOT/bootstrap2.xy"
 BootstrapLL="$BUILD_DIR/bootstrap.ll"
 BootstrapObj="$BUILD_DIR/bootstrap.obj"
@@ -336,6 +344,9 @@ if [ -f "$XycBootExe" ]; then
         fail "xyc_boot 编译测试文件失败"
     fi
 fi
+else
+    info "跳过 Stage 3 (xyc.exe 不可用)"
+fi  # HAS_XYC
 
 # =============================================
 # Stage 4: 逐模块 IR 验证 (L1 单独编译每个 L2 模块)
