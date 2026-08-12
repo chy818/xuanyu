@@ -165,7 +165,7 @@ jobs:
       - name: 构建编译器
         run: cargo build --release
 
-      - name: Stage A: L2 逐模块 IR 验证 + 自举回归
+      - name: "Stage A: L2 逐模块 IR 验证 + 自举回归"
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             XY=target/release/xy.exe
@@ -199,7 +199,7 @@ jobs:
           done
           echo "=== 逐模块验证 + 回归测试通过 ==="
 
-      - name: Stage B: 全模块自举 (L1 -> xyc -> IR)
+      - name: "Stage B: 全模块自举 (L1 -> xyc -> IR)"
         run: |
           echo "=== 全模块自举编译 ==="
           bash tests/bootstrap_full.sh --release
