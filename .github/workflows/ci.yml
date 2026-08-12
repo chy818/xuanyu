@@ -112,7 +112,7 @@ jobs:
           run_xy() {
             local file="$1"; local expect="$2"
             local out
-            out=$("$XY" "$file" --run 2>&1 | sed -n '/--- 运行结果 ---/,$p' | tail -n +2 | sed 's/^-----*$//')
+            out=$("$XY" "$file" --run 2>&1 | sed -n '/--- 运行结果 ---/,$p' | tail -n +2 | sed 's/-----*//g' | grep -v '^$')
             if [ "$out" != "$expect" ]; then
               echo "FAIL: $file"
               echo " 期望: $expect"
@@ -136,7 +136,7 @@ jobs:
           else
             XY=target/release/xy
           fi
-          out=$("$XY" tests/fixtures/test_macro/macro.xy --run 2>&1 | sed -n '/--- 运行结果 ---/,$p' | tail -n +2 | sed 's/^-----*$//')
+          out=$("$XY" tests/fixtures/test_macro/macro.xy --run 2>&1 | sed -n '/--- 运行结果 ---/,$p' | tail -n +2 | sed 's/-----*//g' | grep -v '^$')
           expect="$(printf '42你好，玄语！')"
           if [ "$out" != "$expect" ]; then
             echo "FAIL: macro e2e"
