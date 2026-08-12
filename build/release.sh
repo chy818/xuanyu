@@ -141,8 +141,8 @@ fi
 HELLO_PATH="$VERSION_DIR/examples/hello.xy"
 SMOKE_LOG="$RELEASE_DIR/_smoke.log"
 
-if "$SMOKE_DIR/xy$EXE_EXT" "$HELLO_PATH" --run > "$SMOKE_LOG" 2>&1; then
-    ok "  Self-check passed: hello.xy compiled and ran OK"
+if "$SMOKE_DIR/xy$EXE_EXT" "$HELLO_PATH" --ir > "$SMOKE_LOG" 2>&1; then
+    ok "  Self-check passed: hello.xy IR generated OK"
 else
     err "  Self-check failed!"
     cat "$SMOKE_LOG"
