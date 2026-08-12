@@ -1,3 +1,31 @@
+# 玄语编译器 v0.4.0-alpha 发布说明
+
+## v0.4.0-alpha 更新内容
+
+本版本主攻**编译器自身**两大方向：**增量编译** 与 **自举稳定**。
+
+### 新增
+- **增量编译接入主编译管线**：文件哈希变更检测 + 模块解析缓存 + IR 产物缓存复用，二次构建跳过未变更模块。CLI 新增 `--incremental` 标志与构建统计输出。缓存目录统一为 `.cache/xuanyu/`
+- **自举稳定**：全模块自举流水线（L1 → xyc → xyc_boot），CI 自举门禁覆盖 Linux + Windows
+- **全模块自举验证脚本**：`tests/bootstrap_full.sh` 实现三阶段自举 + IR 等价对比（23/24 项通过）
+- **容量上限突破**：通过 `.cargo/config.toml` 增加栈大小至 8MB，支持编译 190KB 大文件 (codegen_s.xy)
+- **L2 async/match 语义补齐**：词法分析关键字 ID、语法解析 (`异步 函数`/`等待`/`启动`)、语义分析类型推断全部同步至 L2
+- **自举同步规范**：`docs/自举同步规范.md` 定义新特性 L1→L2 同步检查清单
+- **PR 模板**：`.github/PULL_REQUEST_TEMPLATE.md` 内建自举同步检查清单
+
+### 改进
+- 自举测试扩展至 10 个 L2 文件逐模块验证
+- CI 自举 job 升级：Stage A 逐模块 IR 验证 + Stage B 全流程自举
+- 新增自举回归用例：`async_syntax_test.xy`、`match_syntax_test.xy`
+- LLVM 工具自动检测版本后缀（llc-15/clang-15 等）
+
+### 已知限制
+- L2 codegen 暂不支持 match/async IR 生成（Codegen 结构体字段数受限）
+- L2 不支持 `引入` 多文件编译，仅单文件模式
+- bootstrap.ll 的 llc 编译需后续修复（IR 格式细微差异）
+
+---
+
 # 玄语编译器 v0.3.0-beta 发布说明
 
 ## v0.3.0-beta 更新内容

@@ -1,0 +1,24 @@
+/**
+ * @file tests/bootstrap/async_syntax_test.xy
+ * @brief 自举回归: async 语法解析验证
+ * @description 验证 L2 编译器能正确词法/语法/语义分析 async 代码
+ *             (L2 codegen 暂不生成协程 IR，此测试验证 parser/sema 正确性)
+ */
+
+/* 异步函数声明 */
+异步 函数 延迟计算(x: 整数): 整数 {
+    返回 x * 2
+}
+
+函数 主(): 整数 {
+    /* 启动异步任务 */
+    定义 可变 handle: 整数
+    handle = 启动 延迟计算(21)
+
+    /* 等待结果 */
+    定义 可变 result: 整数
+    result = 等待 handle
+
+    打印整数(result)
+    返回 0
+}

@@ -1,0 +1,26 @@
+/**
+ * @file tests/bootstrap/match_syntax_test.xy
+ * @brief 自举回归: match 语法解析验证
+ * @description 验证 L2 编译器能正确词法/语法/语义分析 match 代码
+ *             (L2 codegen 暂不生成 match IR，此测试验证 parser/sema 正确性)
+ */
+
+枚举 颜色 { 红, 绿, 蓝 }
+
+函数 主(): 整数 {
+    定义 可变 c: 整数
+    c = 0
+
+    定义 可变 result: 整数
+    result = 0
+
+    匹配 c {
+        情况 红 => { 打印("红") result = 1 }
+        情况 绿 => { 打印("绿") result = 2 }
+        情况 蓝 => { 打印("蓝") result = 3 }
+        默认 => { 打印("?") result = 0 }
+    }
+
+    打印整数(result)
+    返回 0
+}

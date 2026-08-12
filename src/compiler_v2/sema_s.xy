@@ -1308,6 +1308,9 @@
 
     打印("分析函数定义: ")
     打印(funcName)
+    若 funcNode.intValue == 1 则 {
+        打印("  (异步函数)")
+    }
 
     /* 首先将函数添加到当前作用域 */
     定义 可变 result: 整数
@@ -1484,6 +1487,20 @@
             matchSubject = 列表获取(stmt.children, 0)
             定义 可变 subjectType: 整数
             subjectType = sema遍历表达式(sema, matchSubject)
+
+            /* 遍历每个分支体 */
+            定义 可变 bi: 整数
+            bi = 1
+            当 bi < 列表长度(stmt.children) 则 {
+                定义 可变 branchNode: AST节点
+                branchNode = 列表获取(stmt.children, bi)
+                若 列表长度(branchNode.children) > 0 则 {
+                    定义 可变 branchBody: AST节点
+                    branchBody = 列表获取(branchNode.children, 0)
+                    sema遍历表达式(sema, branchBody)
+                }
+                bi = bi + 1
+            }
 
             定义 可变 branchCount: 整数
             branchCount = 列表长度(stmt.children) - 1
@@ -1781,6 +1798,19 @@
             valueNode = 列表获取(expr.children, 1)
             exprType = sema遍历赋值表达式(sema, targetNode, valueNode)
         }
+    } 否则 若 expr.kind == 31 则 {  /* await表达式 */
+        若 列表长度(expr.children) >= 1 则 {
+            定义 可变 inner: AST节点
+            inner = 列表获取(expr.children, 0)
+            exprType = sema遍历表达式(sema, inner)
+        }
+    } 否则 若 expr.kind == 32 则 {  /* spawn表达式 */
+        若 列表长度(expr.children) >= 1 则 {
+            定义 可变 inner: AST节点
+            inner = 列表获取(expr.children, 0)
+            sema遍历表达式(sema, inner)
+        }
+        exprType = 0  /* 协程句柄为 i64 */
     } 否则 {
         /* 其他类型默认未知，后续可以扩展 */
         exprType = 0

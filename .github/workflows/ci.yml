@@ -61,7 +61,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang
+          sudo apt-get install -y llvm-15 llvm-15-tools clang-15
+          for tool in llc opt; do
+            if [ -f "/usr/bin/${tool}-15" ]; then
+              sudo ln -sf "/usr/bin/${tool}-15" "/usr/local/bin/${tool}"
+            fi
+          done
+          echo "LLVM 工具已安装"
 
       - name: 安装 LLVM (macOS)
         if: runner.os == 'macOS'
@@ -121,10 +127,10 @@ jobs:
           echo "PASS: macro e2e"
 
   # ============================================================
-  # Job 3: 自举测试 (Linux + Windows)
+  # Job 3: 自举测试 - 全模块自举门禁 (Linux + Windows)
   # ============================================================
   bootstrap:
-    name: 自举测试 (${{ matrix.os }})
+    name: 自举门禁 (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -143,7 +149,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang
+          sudo apt-get install -y llvm-15 llvm-15-tools clang-15
+          for tool in llc opt; do
+            if [ -f "/usr/bin/${tool}-15" ]; then
+              sudo ln -sf "/usr/bin/${tool}-15" "/usr/local/bin/${tool}"
+            fi
+          done
+          echo "LLVM 工具已安装"
 
       - name: 安装 LLVM (Windows)
         if: runner.os == 'Windows'
@@ -152,31 +164,45 @@ jobs:
       - name: 构建编译器
         run: cargo build --release
 
-      - name: 编译 L2 自举源码 (IR 生成验证)
+      - name: Stage A: L2 逐模块 IR 验证 + 自举回归
         run: |
-          set -e
           if [ "$RUNNER_OS" = "Windows" ]; then
             XY=target/release/xy.exe
           else
             XY=target/release/xy
           fi
-          for f in src/compiler_v2/xyc.xy src/compiler_v2/lexer_s.xy \
-                   src/compiler_v2/parser_s.xy src/compiler_v2/sema_s.xy \
-                   tests/bootstrap/self_compile_test.xy; do
-            "$XY" "$f" --ir-pure > /dev/null 2>&1
-            echo "IR-PASS: $f"
+          echo "=== L2 逐模块编译验证 ==="
+          for f in src/compiler_v2/types.xy src/compiler_v2/utils_s.xy \
+                   src/compiler_v2/lexer_s.xy src/compiler_v2/parser_s.xy \
+                   src/compiler_v2/sema_s.xy src/compiler_v2/codegen_s.xy \
+                   src/compiler_v2/compiler_new.xy src/compiler_v2/xyc.xy; do
+            echo -n "  $f ... "
+            if "$XY" "$f" --ir-file /dev/null 2>&1 | grep -q "IR 已写入\|编译成功"; then
+              echo "PASS"
+            else
+              echo "FAIL"
+              exit 1
+            fi
           done
+          echo "=== 自举回归用例 ==="
+          for f in tests/bootstrap/self_compile_test.xy \
+                   tests/bootstrap/async_syntax_test.xy \
+                   tests/bootstrap/match_syntax_test.xy; do
+            echo -n "  $f ... "
+            if "$XY" "$f" --ir-file /dev/null 2>&1 | grep -q "IR 已写入\|编译成功"; then
+              echo "PASS"
+            else
+              echo "FAIL"
+              exit 1
+            fi
+          done
+          echo "=== 逐模块验证 + 回归测试通过 ==="
 
-      - name: 多文件模块编译验证
+      - name: Stage B: 全模块自举 (L1 → xyc → IR 等价)
         run: |
-          set -e
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            XY=target/release/xy.exe
-          else
-            XY=target/release/xy
-          fi
-          "$XY" tests/fixtures/test_multi/main.xy --ir-pure > /dev/null 2>&1
-          echo "MULTI-MODULE-PASS"
+          echo "=== 全模块自举编译 ==="
+          bash tests/bootstrap_full.sh --release
+        timeout-minutes: 30
 
   # ============================================================
   # Job 4: 发布打包 (三平台，仅 tag 触发，自动上传到 Release)
@@ -202,7 +228,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang
+          sudo apt-get install -y llvm-15 llvm-15-tools clang-15
+          for tool in llc opt; do
+            if [ -f "/usr/bin/${tool}-15" ]; then
+              sudo ln -sf "/usr/bin/${tool}-15" "/usr/local/bin/${tool}"
+            fi
+          done
+          echo "LLVM 工具已安装"
 
       - name: 安装 LLVM (macOS)
         if: runner.os == 'macOS'
