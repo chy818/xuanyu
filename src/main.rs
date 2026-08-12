@@ -364,13 +364,16 @@ fn compile_single_file(filename: &str, mode: RunMode, debug: bool) -> Result<(),
                 }
             }
 
-            let linker_result = Command::new("clang")
+            let mut linker_cmd = Command::new("clang");
+            linker_cmd
                 .arg(runtime_obj)
                 .arg(temp_obj)
                 .arg("-o")
-                .arg(output_exe)
-                .arg("-Wl,/SUBSYSTEM:console")
-                .status();
+                .arg(output_exe);
+            if cfg!(target_os = "windows") {
+                linker_cmd.arg("-Wl,/SUBSYSTEM:console");
+            }
+            let linker_result = linker_cmd.status();
 
             match linker_result {
                 Ok(status) => {
@@ -879,13 +882,16 @@ fn compile_multi_file(filename: &str, mode: RunMode, debug: bool, incremental: b
                 }
             }
 
-            let linker_result = Command::new("clang")
+            let mut linker_cmd = Command::new("clang");
+            linker_cmd
                 .arg(runtime_obj)
                 .arg(temp_obj)
                 .arg("-o")
-                .arg(output_exe)
-                .arg("-Wl,/SUBSYSTEM:console")
-                .status();
+                .arg(output_exe);
+            if cfg!(target_os = "windows") {
+                linker_cmd.arg("-Wl,/SUBSYSTEM:console");
+            }
+            let linker_result = linker_cmd.status();
 
             match linker_result {
                 Ok(status) => {
