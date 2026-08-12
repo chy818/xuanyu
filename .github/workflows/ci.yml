@@ -78,7 +78,13 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install llvm -y --no-progress
-          echo "C:\Program Files\LLVM\bin" >> $GITHUB_PATH
+          # 查找 llc 并添加所在目录到 PATH
+          LLC_DIR=$(dirname "$(find /c/Program\ Files/LLVM -name llc.exe 2>/dev/null | head -1)")
+          if [ -n "$LLC_DIR" ]; then
+            echo "$LLC_DIR" >> $GITHUB_PATH
+            export PATH="$LLC_DIR:$PATH"
+          fi
+          llc --version 2>/dev/null | head -1 || echo "LLVM installed but llc not found"
           echo "LLVM 已安装"
 
       - name: 构建编译器
@@ -249,7 +255,13 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install llvm -y --no-progress
-          echo "C:\Program Files\LLVM\bin" >> $GITHUB_PATH
+          # 查找 llc 并添加所在目录到 PATH
+          LLC_DIR=$(dirname "$(find /c/Program\ Files/LLVM -name llc.exe 2>/dev/null | head -1)")
+          if [ -n "$LLC_DIR" ]; then
+            echo "$LLC_DIR" >> $GITHUB_PATH
+            export PATH="$LLC_DIR:$PATH"
+          fi
+          llc --version 2>/dev/null | head -1 || echo "LLVM installed but llc not found"
           echo "LLVM 已安装"
 
       - name: 构建发布包
