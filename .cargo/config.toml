@@ -1,7 +1,11 @@
 # 增加栈大小以支持编译大文件（如 codegen_s.xy 190KB）
-# 默认 Windows 主线程栈为 1MB，大型递归下降解析器需要更大栈空间
+# Windows: 默认主线程栈 1MB → 8MB
 [target.'cfg(windows)']
 rustflags = ["-C", "link-arg=/STACK:8388608"]
 
-[target.'cfg(not(windows))']
+# Linux: 大文件递归下降解析器需要更大栈空间
+[target.'cfg(target_os = "linux")']
 rustflags = ["-C", "link-arg=-Wl,-z,stack-size=8388608"]
+
+# macOS: 默认栈 8MB 已足够，不需要额外设置
+# (Apple ld 不支持 -z stack-size)
