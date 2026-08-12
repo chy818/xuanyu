@@ -16,13 +16,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/target/l2_compiler"
 
-# 编译器路径
+# 编译器路径（跨平台）
 if [ "$1" = "--release" ]; then
-    XY_COMPILER="$PROJECT_ROOT/target/release/xy.exe"
+    XY_DIR="$PROJECT_ROOT/target/release"
     PROFILE="release"
 else
-    XY_COMPILER="$PROJECT_ROOT/target/debug/xy.exe"
+    XY_DIR="$PROJECT_ROOT/target/debug"
     PROFILE="debug"
+fi
+if [ -f "$XY_DIR/xy.exe" ]; then
+    XY_COMPILER="$XY_DIR/xy.exe"
+else
+    XY_COMPILER="$XY_DIR/xy"
 fi
 
 # LLVM 工具检测（CI 中可能无版本后缀，或为 llc-15 等）

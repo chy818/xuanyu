@@ -61,21 +61,25 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-15 llvm-15-tools clang-15
-          for tool in llc opt; do
-            if [ -f "/usr/bin/${tool}-15" ]; then
-              sudo ln -sf "/usr/bin/${tool}-15" "/usr/local/bin/${tool}"
-            fi
-          done
-          echo "LLVM 工具已安装"
+          sudo apt-get install -y llvm clang lld
+          echo "LLVM 工具已安装:"
+          llc --version | head -1
 
       - name: 安装 LLVM (macOS)
         if: runner.os == 'macOS'
-        run: brew install llvm clang
+        run: |
+          brew install llvm
+          echo 'export PATH="/usr/local/opt/llvm/bin:$PATH"' >> ~/.bash_profile
+          echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.bash_profile
+          export PATH="/usr/local/opt/llvm/bin:/opt/homebrew/opt/llvm/bin:$PATH"
+          echo "LLVM 工具路径: $(which llc)"
 
       - name: 安装 LLVM (Windows)
         if: runner.os == 'Windows'
-        run: choco install llvm -y
+        run: |
+          choco install llvm -y
+          echo "C:\Program Files\LLVM\bin" >> $GITHUB_PATH
+          echo "LLVM 已安装"
 
       - name: 构建编译器
         run: cargo build --release
@@ -228,21 +232,25 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-15 llvm-15-tools clang-15
-          for tool in llc opt; do
-            if [ -f "/usr/bin/${tool}-15" ]; then
-              sudo ln -sf "/usr/bin/${tool}-15" "/usr/local/bin/${tool}"
-            fi
-          done
-          echo "LLVM 工具已安装"
+          sudo apt-get install -y llvm clang lld
+          echo "LLVM 工具已安装:"
+          llc --version | head -1
 
       - name: 安装 LLVM (macOS)
         if: runner.os == 'macOS'
-        run: brew install llvm clang
+        run: |
+          brew install llvm
+          echo 'export PATH="/usr/local/opt/llvm/bin:$PATH"' >> ~/.bash_profile
+          echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.bash_profile
+          export PATH="/usr/local/opt/llvm/bin:/opt/homebrew/opt/llvm/bin:$PATH"
+          echo "LLVM 工具路径: $(which llc)"
 
       - name: 安装 LLVM (Windows)
         if: runner.os == 'Windows'
-        run: choco install llvm -y
+        run: |
+          choco install llvm -y
+          echo "C:\Program Files\LLVM\bin" >> $GITHUB_PATH
+          echo "LLVM 已安装"
 
       - name: 构建发布包
         run: |
