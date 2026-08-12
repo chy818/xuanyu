@@ -132,6 +132,7 @@ jobs:
   bootstrap:
     name: 自举门禁 (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -177,7 +178,7 @@ jobs:
                    src/compiler_v2/sema_s.xy src/compiler_v2/codegen_s.xy \
                    src/compiler_v2/compiler_new.xy src/compiler_v2/xyc.xy; do
             echo -n "  $f ... "
-            if "$XY" "$f" --ir-file /dev/null 2>&1 | grep -q "IR 已写入\|编译成功"; then
+            if "$XY" "$f" --ir 2>&1 | grep -q "编译成功"; then
               echo "PASS"
             else
               echo "FAIL"
@@ -189,7 +190,7 @@ jobs:
                    tests/bootstrap/async_syntax_test.xy \
                    tests/bootstrap/match_syntax_test.xy; do
             echo -n "  $f ... "
-            if "$XY" "$f" --ir-file /dev/null 2>&1 | grep -q "IR 已写入\|编译成功"; then
+            if "$XY" "$f" --ir 2>&1 | grep -q "编译成功"; then
               echo "PASS"
             else
               echo "FAIL"
@@ -198,11 +199,10 @@ jobs:
           done
           echo "=== 逐模块验证 + 回归测试通过 ==="
 
-      - name: Stage B: 全模块自举 (L1 → xyc → IR 等价)
+      - name: Stage B: 全模块自举 (L1 -> xyc -> IR)
         run: |
           echo "=== 全模块自举编译 ==="
           bash tests/bootstrap_full.sh --release
-        timeout-minutes: 30
 
   # ============================================================
   # Job 4: 发布打包 (三平台，仅 tag 触发，自动上传到 Release)
